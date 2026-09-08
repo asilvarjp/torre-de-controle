@@ -220,3 +220,30 @@ begin
     end;
   end loop;
 end $$;
+
+-- ---------------------------------------------------------------------------
+-- Restringe a criação de contas a e-mails @grupowish.com, direto no banco.
+-- Isso funciona independente da configuração de "cadastro público" do painel
+-- Authentication do Supabase (que em algumas versões do painel liga cadastro
+-- e login na mesma chave) — nenhuma conta com outro domínio consegue ser
+-- criada, seja por autocadastro ou por convite feito por engano.
+-- Se algum dia a equipe usar outro domínio de e-mail, ajuste a expressão
+-- abaixo (troque "grupowish\.com" pelo domínio correto).
+-- ---------------------------------------------------------------------------
+create or replace function public.restrict_signup_domain()
+returns trigger
+language plpgsql
+security definer
+as $$
+begin
+  if new.email is null or new.email !~* '@grupowish\.com$' then
+    raise exception 'Cadastro permitido apenas para e-mails @grupowish.com';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_restrict_signup_domain on auth.users;
+create trigger trg_restrict_signup_domain
+before insert on auth.users
+for each row execute function public.restrict_signup_domain();

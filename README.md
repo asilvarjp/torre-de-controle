@@ -28,21 +28,29 @@ remoto (TeamViewer) e outros dados internos.
 1. No menu lateral do projeto, abra **SQL Editor** → **New query**.
 2. Abra o arquivo [`supabase/schema.sql`](supabase/schema.sql) deste
    repositório, copie todo o conteúdo, cole no editor e clique em **Run**.
-3. Isso cria as 9 tabelas do sistema, ativa a atualização em tempo real e
-   configura as regras de segurança (só usuários logados leem/gravam dados).
+3. Isso cria as 9 tabelas do sistema, ativa a atualização em tempo real,
+   configura as regras de segurança (só usuários logados leem/gravam dados)
+   **e** já restringe a criação de contas a e-mails `@grupowish.com` (trigger
+   no banco — ver passo 3 abaixo).
 
 ### 3. Restringir o acesso só à equipe
 
-Por padrão o Supabase permite que qualquer pessoa se cadastre sozinha. Para
-este sistema, o recomendado é **desativar o autocadastro** e você (admin)
-convidar cada pessoa da equipe:
+O painel **Authentication → Sign In / Providers → Email** do Supabase, em
+algumas versões, só tem um interruptor único ("Enable email provider") que
+liga cadastro *e* login juntos — não dá pra desligar só o cadastro por ali
+sem quebrar o login também. Por isso o `schema.sql` (passo 2) já cria, direto
+no banco, uma trava mais confiável: **só e-mails `@grupowish.com` conseguem
+criar conta**, não importa a configuração desse painel. Se sua equipe usar
+outro domínio de e-mail, edite a expressão `@grupowish\.com` no final do
+`schema.sql` antes de rodar.
 
-1. Vá em **Authentication** → **Providers** → **Email** e desative a opção
-   **"Allow new users to sign up"**.
-2. Para dar acesso a alguém: **Authentication** → **Users** → **Invite user**,
-   digite o e-mail da pessoa (ex: `nome@grupowish.com`) e envie. A pessoa
-   recebe um e-mail com um link para criar a própria senha — na primeira vez
-   que abrir o link, o site vai mostrar a tela "Defina sua senha".
+Para dar acesso a alguém da equipe:
+1. **Authentication** → **Users** → **Invite user** (ou **Add user** →
+   **Invite user**, dependendo da versão do painel).
+2. Digite o e-mail da pessoa (precisa ser `@grupowish.com`) e envie.
+3. A pessoa recebe um e-mail com um link para criar a própria senha — na
+   primeira vez que abrir o link (depois do site publicado), a Torre de
+   Controle mostra direto a tela "Defina sua senha".
 
 ### 4. Conectar o site ao seu projeto
 
