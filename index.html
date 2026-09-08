@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Torre de Controle · Sustentação GJP Hotels</title>
+<meta name="description" content="Sistema interno da Sustentação para inventário, estoque, locação, compras, licenças, transporte, impressoras e acessos TeamViewer das unidades GJP Hotels & Resorts.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ctext y='20' font-size='20'%3E%F0%9F%97%BC%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:wght@400;500;600;700&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --bg:#F6F2E9; --surface:#FFFFFF; --surface-2:#EFE8D8; --surface-3:#E6DEC7;
+  --border:#DED4BC; --ink:#211C12; --ink-dim:#6E6550; --ink-faint:#A79C82;
+  --accent:#1F6B63; --accent-strong:#154C46; --accent-soft:#DCEEEA; --accent-ink:#0F3B36;
+  --brass:#A9662A; --brass-soft:#F3E3C8; --brass-ink:#5C3814;
+  --ok:#2F7A4F; --ok-soft:#DFF0E3; --ok-ink:#1C4B30;
+  --warn:#B8862E; --warn-soft:#F5EACB; --warn-ink:#6B4E12;
+  --crit:#B8503A; --crit-soft:#F6DFD8; --crit-ink:#7A2E1D;
+  --neutral:#6E6550; --neutral-soft:#EFE8D8; --neutral-ink:#3E3826;
+  --shadow: 0 1px 2px rgba(33,28,18,.06), 0 8px 24px -12px rgba(33,28,18,.18);
+  --radius: 10px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#161A17; --surface:#1E2420; --surface-2:#242B25; --surface-3:#2C342D;
+    --border:#333D35; --ink:#EDE8DB; --ink-dim:#A6A08D; --ink-faint:#726C59;
+    --accent:#4FB3A4; --accent-strong:#7ECFC1; --accent-soft:#1E3B36; --accent-ink:#BFEBE1;
+    --brass:#D9A354; --brass-soft:#3A2C15; --brass-ink:#F0CE97;
+    --ok:#5FB57E; --ok-soft:#1D3327; --ok-ink:#A7E2BB;
+    --warn:#D9B25C; --warn-soft:#3A2F14; --warn-ink:#EFD497;
+    --crit:#DD7B62; --crit-soft:#3B2117; --crit-ink:#F3B29D;
+    --neutral:#8B8570; --neutral-soft:#262E28; --neutral-ink:#C7C1AC;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 12px 28px -14px rgba(0,0,0,.55);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#161A17; --surface:#1E2420; --surface-2:#242B25; --surface-3:#2C342D;
+  --border:#333D35; --ink:#EDE8DB; --ink-dim:#A6A08D; --ink-faint:#726C59;
+  --accent:#4FB3A4; --accent-strong:#7ECFC1; --accent-soft:#1E3B36; --accent-ink:#BFEBE1;
+  --brass:#D9A354; --brass-soft:#3A2C15; --brass-ink:#F0CE97;
+  --ok:#5FB57E; --ok-soft:#1D3327; --ok-ink:#A7E2BB;
+  --warn:#D9B25C; --warn-soft:#3A2F14; --warn-ink:#EFD497;
+  --crit:#DD7B62; --crit-soft:#3B2117; --crit-ink:#F3B29D;
+  --neutral:#8B8570; --neutral-soft:#262E28; --neutral-ink:#C7C1AC;
+  --shadow: 0 1px 2px rgba(0,0,0,.3), 0 12px 28px -14px rgba(0,0,0,.55);
+  color-scheme: dark;
+}
+*{box-sizing:border-box;}
+html,body{margin:0; padding:0;}
+body{background:var(--bg); color:var(--ink); font-family:'Public Sans',system-ui,-apple-system,Segoe UI,Arial,sans-serif; -webkit-font-smoothing:antialiased; font-size:14px;}
+h1,h2,h3,.display{font-family:'Fraunces',Georgia,'Times New Roman',serif; text-wrap:balance;}
+.mono{font-family:'IBM Plex Mono',ui-monospace,Consolas,monospace; font-variant-numeric:tabular-nums;}
+a{color:var(--accent);}
+img{max-width:100%;}
+[hidden]{display:none !important;}
+::selection{background:var(--accent-soft); color:var(--accent-ink);}
+:focus-visible{outline:2px solid var(--accent); outline-offset:2px; border-radius:4px;}
+button{font-family:inherit; cursor:pointer;}
+@media (prefers-reduced-motion: reduce){ *{animation-duration:.01ms !important; transition-duration:.01ms !important;} }
+
+.icon{width:18px; height:18px; flex:0 0 auto; display:block;}
+.icon svg{width:100%; height:100%;}
+
+.app{display:flex; min-height:100vh;}
+
+/* ---------- Sidebar ---------- */
+.sidebar{width:246px; flex:0 0 246px; background:var(--surface); border-right:1px solid var(--border); display:flex; flex-direction:column; position:sticky; top:0; height:100vh; overflow-y:auto;}
+.brand{padding:22px 20px 16px; display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--border);}
+.brand-mark{width:34px; height:34px; border-radius:8px; background:linear-gradient(155deg,var(--accent),var(--accent-strong)); display:flex; align-items:center; justify-content:center; color:#fff; flex:0 0 auto;}
+.brand-mark svg{width:19px; height:19px;}
+.brand-text{line-height:1.15;}
+.brand-text .t1{font-family:'Fraunces',serif; font-weight:600; font-size:16.5px;}
+.brand-text .t2{font-size:11px; color:var(--ink-faint); letter-spacing:.04em; text-transform:uppercase;}
+nav.nav{padding:14px 12px; display:flex; flex-direction:column; gap:2px; flex:1;}
+.nav-section-label{font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-faint); padding:12px 10px 6px;}
+.nav-btn{display:flex; align-items:center; gap:11px; padding:9px 10px; border:none; background:transparent; color:var(--ink-dim); border-radius:8px; text-align:left; font-size:13.6px; font-weight:500; transition:background .12s, color .12s;}
+.nav-btn:hover{background:var(--surface-2); color:var(--ink);}
+.nav-btn.active{background:var(--accent-soft); color:var(--accent-ink);}
+.nav-btn .icon{color:inherit; opacity:.85;}
+.nav-btn .count{margin-left:auto; font-size:11px; background:var(--surface-3); color:var(--ink-dim); padding:1px 7px; border-radius:99px; font-family:'IBM Plex Mono',monospace;}
+.nav-btn.active .count{background:var(--accent); color:#fff;}
+.sidebar-foot{padding:12px 14px; border-top:1px solid var(--border); font-size:11.5px; color:var(--ink-faint); display:flex; align-items:center; gap:7px;}
+.dot{width:7px; height:7px; border-radius:50%; background:var(--ok); flex:0 0 auto;}
+.dot.off{background:var(--neutral);}
+.user-email{flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+
+/* ---------- Main ---------- */
+.main{flex:1; min-width:0; display:flex; flex-direction:column;}
+.topbar{position:sticky; top:0; z-index:20; background:var(--bg); border-bottom:1px solid var(--border); padding:16px 26px; display:flex; align-items:center; gap:16px; flex-wrap:wrap;}
+.topbar-title{display:flex; align-items:center; gap:10px; margin-right:auto;}
+.topbar-title .icon{width:20px; height:20px; color:var(--accent);}
+.topbar-title h1{font-size:19px; font-weight:600; margin:0;}
+.topbar-title .sub{font-size:12px; color:var(--ink-faint); margin-top:1px;}
+.topbar-controls{display:flex; align-items:center; gap:9px; flex-wrap:wrap;}
+.field-select, .search-box input, select, input[type=text], input[type=date], input[type=number], input[type=email], textarea, input[type=password]{
+  font-family:inherit; font-size:13px; color:var(--ink); background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:8px 11px;
+}
+select{appearance:none; -webkit-appearance:none; background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23928a72' stroke-width='2'%3E%3Cpolyline points='6,9 12,15 18,9'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 9px center; background-size:14px; padding-right:30px;}
+.search-box{position:relative;}
+.search-box .icon{position:absolute; left:10px; top:50%; transform:translateY(-50%); color:var(--ink-faint); pointer-events:none;}
+.search-box input{padding-left:32px; width:210px;}
+.btn{display:inline-flex; align-items:center; gap:7px; padding:8px 14px; border-radius:8px; border:1px solid var(--border); background:var(--surface); color:var(--ink); font-size:13px; font-weight:600;}
+.btn:hover{background:var(--surface-2);}
+.btn-primary{background:var(--accent); border-color:var(--accent); color:#fff;}
+.btn-primary:hover{background:var(--accent-strong); border-color:var(--accent-strong);}
+.btn:disabled{opacity:.5; cursor:not-allowed;}
+
+#content{padding:22px 26px 60px; flex:1;}
+
+/* ---------- Dashboard ---------- */
+.kpi-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:12px; margin-bottom:26px;}
+.kpi{background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:16px 17px; box-shadow:var(--shadow);}
+.kpi .icon{color:var(--brass); margin-bottom:10px;}
+.kpi .num{font-family:'Fraunces',serif; font-size:30px; font-weight:600; color:var(--brass-ink); line-height:1;}
+:root[data-theme="dark"] .kpi .num, :root:not([data-theme="light"]) .kpi .num{color:var(--brass);}
+.kpi .lbl{font-size:12.5px; color:var(--ink-dim); margin-top:6px;}
+.dash-grid{display:grid; grid-template-columns:1.3fr 1fr; gap:16px;}
+@media (max-width:980px){ .dash-grid{grid-template-columns:1fr;} }
+.panel{background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:18px 20px; box-shadow:var(--shadow);}
+.panel h2{font-size:15.5px; font-weight:600; margin:0 0 4px;}
+.panel .panel-sub{font-size:12px; color:var(--ink-faint); margin-bottom:14px;}
+.bar-row{display:flex; align-items:center; gap:10px; padding:6px 0;}
+.bar-row .bl{width:132px; flex:0 0 auto; font-size:12.5px; color:var(--ink-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.bar-track{flex:1; height:9px; background:var(--surface-2); border-radius:99px; overflow:hidden;}
+.bar-fill{height:100%; background:linear-gradient(90deg,var(--brass),var(--accent)); border-radius:99px;}
+.bar-row .bv{width:28px; text-align:right; font-size:12px; font-family:'IBM Plex Mono',monospace; color:var(--ink-faint);}
+.alert-list{display:flex; flex-direction:column; gap:9px;}
+.alert-item{display:flex; align-items:flex-start; gap:9px; padding:9px 10px; background:var(--surface-2); border-radius:8px; font-size:12.5px;}
+.alert-item .icon{color:var(--warn); flex:0 0 auto; margin-top:1px;}
+.alert-item b{font-weight:600;}
+.empty-note{font-size:12.5px; color:var(--ink-faint); padding:8px 2px;}
+
+/* ---------- Table ---------- */
+.table-wrap{background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; box-shadow:var(--shadow);}
+.table-scroll{overflow-x:auto;}
+table{width:100%; border-collapse:collapse; font-size:13px;}
+thead th{text-align:left; font-size:11px; letter-spacing:.05em; text-transform:uppercase; color:var(--ink-faint); font-weight:600; padding:11px 14px; border-bottom:1px solid var(--border); background:var(--surface-2); white-space:nowrap;}
+tbody td{padding:11px 14px; border-bottom:1px solid var(--border); color:var(--ink); vertical-align:middle;}
+tbody tr:last-child td{border-bottom:none;}
+tbody tr:hover{background:var(--surface-2);}
+td.num-cell, th.num-cell{text-align:right; font-family:'IBM Plex Mono',monospace;}
+.cell-mono{font-family:'IBM Plex Mono',monospace; font-size:12.5px; color:var(--ink-dim);}
+.cell-actions{display:flex; gap:4px; justify-content:flex-end;}
+.icon-btn{width:28px; height:28px; display:flex; align-items:center; justify-content:center; border-radius:7px; border:1px solid transparent; background:transparent; color:var(--ink-faint);}
+.icon-btn:hover{background:var(--surface-3); color:var(--ink);}
+.icon-btn.danger:hover{background:var(--crit-soft); color:var(--crit);}
+.icon-btn .icon{width:15px; height:15px;}
+.badge{display:inline-flex; align-items:center; gap:5px; font-size:11.5px; font-weight:600; padding:3px 9px; border-radius:99px; white-space:nowrap;}
+.badge.ok{background:var(--ok-soft); color:var(--ok-ink);}
+.badge.warn{background:var(--warn-soft); color:var(--warn-ink);}
+.badge.crit{background:var(--crit-soft); color:var(--crit-ink);}
+.badge.neutral{background:var(--neutral-soft); color:var(--neutral-ink);}
+.pass-cell{display:flex; align-items:center; gap:6px;}
+.dots{font-family:'IBM Plex Mono',monospace; letter-spacing:2px;}
+.table-empty{padding:52px 20px; text-align:center; color:var(--ink-faint);}
+.table-empty .icon{width:30px; height:30px; margin:0 auto 10px; opacity:.55;}
+.table-empty b{color:var(--ink-dim); display:block; margin-bottom:4px; font-weight:600;}
+.result-count{font-size:11.5px; color:var(--ink-faint); padding:10px 14px 0;}
+
+/* ---------- Modal ---------- */
+.modal-overlay{position:fixed; inset:0; background:rgba(20,17,10,.42); backdrop-filter:blur(1.5px); display:flex; align-items:flex-start; justify-content:center; padding:5vh 16px; z-index:100; overflow-y:auto;}
+:root[data-theme="dark"] .modal-overlay, :root:not([data-theme="light"]) .modal-overlay{background:rgba(0,0,0,.55);}
+.modal{background:var(--surface); border-radius:14px; width:100%; max-width:640px; box-shadow:0 24px 60px -20px rgba(0,0,0,.35); border:1px solid var(--border);}
+.modal.small{max-width:400px;}
+.modal-head{display:flex; align-items:center; justify-content:space-between; padding:18px 22px; border-bottom:1px solid var(--border);}
+.modal-head h2{font-size:16.5px; font-weight:600; margin:0;}
+.modal-body{padding:20px 22px; max-height:64vh; overflow-y:auto;}
+.modal-foot{display:flex; justify-content:flex-end; gap:9px; padding:16px 22px; border-top:1px solid var(--border);}
+.form-grid{display:grid; grid-template-columns:1fr 1fr; gap:14px 14px;}
+.form-field{display:flex; flex-direction:column; gap:5px;}
+.form-field.full{grid-column:1/-1;}
+.form-field label{font-size:12px; font-weight:600; color:var(--ink-dim);}
+.pass-input-row{display:flex; gap:6px;}
+.pass-input-row input{flex:1;}
+textarea{resize:vertical; min-height:64px; font-family:inherit;}
+.toast-stack{position:fixed; bottom:20px; right:20px; display:flex; flex-direction:column; gap:8px; z-index:200;}
+.toast{background:var(--ink); color:var(--bg); font-size:13px; padding:10px 16px; border-radius:9px; box-shadow:var(--shadow); display:flex; align-items:center; gap:8px; animation:toastin .18s ease-out;}
+:root[data-theme="dark"] .toast, :root:not([data-theme="light"]) .toast{background:var(--surface-3); color:var(--ink);}
+.toast.err{background:var(--crit);}
+@keyframes toastin{from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:translateY(0);}}
+
+/* ---------- Auth / config screens ---------- */
+.auth-shell{min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px;}
+.auth-card{width:100%; max-width:380px; background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:32px 30px; box-shadow:var(--shadow); text-align:center;}
+.auth-card.wide{max-width:560px; text-align:left;}
+.auth-card .brand-mark{margin:0 auto 16px;}
+.auth-card h1{font-size:20px; margin:0 0 4px;}
+.auth-card p.sub{font-size:13px; color:var(--ink-faint); margin:0 0 22px;}
+.auth-field{display:flex; flex-direction:column; gap:5px; margin-bottom:14px; text-align:left;}
+.auth-field label{font-size:12px; font-weight:600; color:var(--ink-dim);}
+.auth-field input{width:100%;}
+.auth-error{background:var(--crit-soft); color:var(--crit-ink); font-size:12.5px; padding:9px 12px; border-radius:8px; margin-bottom:14px; text-align:left;}
+.auth-info{background:var(--accent-soft); color:var(--accent-ink); font-size:12.5px; padding:9px 12px; border-radius:8px; margin-bottom:14px; text-align:left;}
+.auth-submit{width:100%; justify-content:center; margin-top:4px;}
+.auth-links{margin-top:14px; font-size:12.5px;}
+.spinner{width:28px; height:28px; border-radius:50%; border:3px solid var(--surface-3); border-top-color:var(--accent); animation:spin .8s linear infinite; margin:0 auto 14px;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.auth-card ol, .auth-card ul{margin:0 0 18px; padding-left:20px; font-size:13px; color:var(--ink-dim); line-height:1.7;}
+.auth-card code{font-family:'IBM Plex Mono',monospace; background:var(--surface-2); padding:1px 5px; border-radius:4px; font-size:12px;}
+
+/* ---------- Mobile ---------- */
+@media (max-width:880px){
+  .app{flex-direction:column;}
+  .sidebar{width:100%; flex:none; height:auto; position:relative; border-right:none; border-bottom:1px solid var(--border);}
+  nav.nav{flex-direction:row; overflow-x:auto; padding:10px 12px; gap:6px;}
+  .nav-section-label{display:none;}
+  .nav-btn{flex:0 0 auto;}
+  .nav-btn span.lbl-full{display:none;}
+  .sidebar-foot .user-email{display:none;}
+  .topbar{padding:14px 16px;}
+  #content{padding:16px;}
+  .search-box input{width:150px;}
+  .form-grid{grid-template-columns:1fr;}
+}
+</style>
+</head>
+<body>
+
+<!-- Splash inicial, antes de sabermos se há sessão -->
+<div class="auth-shell" id="loadingScreen">
+  <div style="text-align:center;">
+    <div class="spinner"></div>
+    <p style="color:var(--ink-faint); font-size:13px;">Carregando…</p>
+  </div>
+</div>
+
+<!-- Exibida quando js/config.js ainda tem os valores de exemplo -->
+<div class="auth-shell" id="configScreen" hidden>
+  <div class="auth-card wide">
+    <h1>Configuração necessária</h1>
+    <p class="sub">O arquivo <code>js/config.js</code> ainda não foi preenchido com os dados do seu projeto Supabase.</p>
+    <ol>
+      <li>Crie um projeto gratuito em <a href="https://supabase.com" target="_blank" rel="noopener">supabase.com</a>.</li>
+      <li>Rode o script <code>supabase/schema.sql</code> no SQL Editor do projeto.</li>
+      <li>Copie a <b>Project URL</b> e a <b>anon public key</b> em Project Settings → API.</li>
+      <li>Cole os dois valores em <code>js/config.js</code> e recarregue esta página.</li>
+    </ol>
+    <p class="sub" style="margin:0;">Veja o passo a passo completo no <code>README.md</code> do repositório.</p>
+  </div>
+</div>
+
+<!-- Tela de login -->
+<div class="auth-shell" id="loginScreen" hidden>
+  <div class="auth-card">
+    <div class="brand-mark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v6"/><path d="M8 6h8l2 4H6z"/><path d="M6 10v11"/><path d="M18 10v11"/><path d="M3 21h18"/><path d="M9 14h.01"/><path d="M12 14h.01"/><path d="M15 14h.01"/><path d="M9 17h.01"/><path d="M12 17h.01"/><path d="M15 17h.01"/></svg>
+    </div>
+    <h1>Torre de Controle</h1>
+    <p class="sub">Sustentação · GJP Hotels &amp; Resorts</p>
+    <div class="auth-error" id="loginError" hidden></div>
+    <form id="loginForm">
+      <div class="auth-field">
+        <label for="loginEmail">E-mail</label>
+        <input type="email" id="loginEmail" name="email" autocomplete="username" required placeholder="voce@grupowish.com">
+      </div>
+      <div class="auth-field">
+        <label for="loginPassword">Senha</label>
+        <input type="password" id="loginPassword" name="password" autocomplete="current-password" required placeholder="••••••••">
+      </div>
+      <button type="submit" class="btn btn-primary auth-submit" id="loginSubmit">Entrar</button>
+    </form>
+    <div class="auth-links"><a href="#" id="forgotLink">Esqueci minha senha</a></div>
+  </div>
+</div>
+
+<!-- Tela de definição de senha (convite ou recuperação) -->
+<div class="auth-shell" id="recoveryScreen" hidden>
+  <div class="auth-card">
+    <h1>Defina sua senha</h1>
+    <p class="sub">Escolha uma senha para acessar a Torre de Controle.</p>
+    <div class="auth-error" id="recoveryError" hidden></div>
+    <form id="recoveryForm">
+      <div class="auth-field">
+        <label for="recoveryPass1">Nova senha</label>
+        <input type="password" id="recoveryPass1" required minlength="8" placeholder="Mínimo 8 caracteres">
+      </div>
+      <div class="auth-field">
+        <label for="recoveryPass2">Confirmar senha</label>
+        <input type="password" id="recoveryPass2" required minlength="8" placeholder="Repita a senha">
+      </div>
+      <button type="submit" class="btn btn-primary auth-submit" id="recoverySubmit">Salvar senha</button>
+    </form>
+  </div>
+</div>
+
+<!-- Aplicativo -->
+<div class="app" id="app" hidden>
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v6"/><path d="M8 6h8l2 4H6z"/><path d="M6 10v11"/><path d="M18 10v11"/><path d="M3 21h18"/><path d="M9 14h.01"/><path d="M12 14h.01"/><path d="M15 14h.01"/><path d="M9 17h.01"/><path d="M12 17h.01"/><path d="M15 17h.01"/></svg>
+      </div>
+      <div class="brand-text">
+        <div class="t1">Torre de Controle</div>
+        <div class="t2">Sustentação · GJP Hotels</div>
+      </div>
+    </div>
+    <nav class="nav" id="navList"></nav>
+    <div class="sidebar-foot" id="syncStatus"></div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <div class="topbar-title">
+        <span class="icon" id="topbarIcon"></span>
+        <div>
+          <h1 id="topbarTitle">Painel geral</h1>
+          <div class="sub" id="topbarSub">Visão consolidada de todas as unidades</div>
+        </div>
+      </div>
+      <div class="topbar-controls" id="topbarControls"></div>
+    </header>
+    <section id="content"></section>
+  </div>
+</div>
+
+<div id="modalRoot"></div>
+<div class="toast-stack" id="toastStack"></div>
+
+<script src="js/config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
