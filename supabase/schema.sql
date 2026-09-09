@@ -165,9 +165,24 @@ create table if not exists public.depreciacao (
   ano_aquisicao integer,
   valor_aquisicao numeric,
   vida_util_anos integer,
+  anos_uso integer,
+  deprec_anual numeric,
+  deprec_acumulada numeric,
+  valor_residual numeric,
+  recomendar_substituicao text,
+  prioridade text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+-- Colunas adicionadas depois da primeira versão do schema — seguro rodar
+-- de novo mesmo se a tabela já existir com as colunas antigas apenas.
+alter table public.depreciacao add column if not exists anos_uso integer;
+alter table public.depreciacao add column if not exists deprec_anual numeric;
+alter table public.depreciacao add column if not exists deprec_acumulada numeric;
+alter table public.depreciacao add column if not exists valor_residual numeric;
+alter table public.depreciacao add column if not exists recomendar_substituicao text;
+alter table public.depreciacao add column if not exists prioridade text;
 
 -- ---------------------------------------------------------------------------
 -- Trigger de updated_at + Row Level Security, aplicados igualmente a todas

@@ -204,34 +204,28 @@ const MODULES = {
   },
   depreciacao:{
     label:'Depreciação', icon:'depreciacao', collection:'depreciacao',
-    title:'Depreciação de ativos', sub:'Vida útil, valor residual e recomendação de substituição',
+    title:'Depreciação de ativos', sub:'Vida útil, valor residual e recomendação de substituição por equipamento',
     unitField:'unidade',
     searchFields:['identificador','modelo'],
-    columns:['identificador','unidade','ano_aquisicao','anos_uso','valor_residual','recomendar'],
+    columns:['identificador','unidade','ano_aquisicao','anos_uso','valor_residual','recomendar_substituicao','prioridade'],
     fields:[
-      {key:'identificador', label:'Identificador / patrimônio', type:'text', required:true, mono:true},
+      {key:'identificador', label:'Identificador', type:'text', required:true, mono:true},
+      {key:'unidade', label:'Unidade', type:'unidade', required:true},
       {key:'modelo', label:'Modelo', type:'text'},
       {key:'processador', label:'Processador', type:'text'},
-      {key:'unidade', label:'Unidade', type:'unidade'},
-      {key:'ano_aquisicao', label:'Ano de aquisição', type:'number', default:new Date().getFullYear()},
-      {key:'valor_aquisicao', label:'Valor de aquisição (R$)', type:'number', currency:true},
-      {key:'vida_util_anos', label:'Vida útil (anos)', type:'number', default:5},
+      {key:'ano_aquisicao', label:'Ano de Aquisição', type:'number', default:new Date().getFullYear()},
+      {key:'valor_aquisicao', label:'Valor de Aquisição (R$)', type:'number', currency:true},
+      {key:'vida_util_anos', label:'Vida Útil (anos)', type:'number', default:5},
+      {key:'anos_uso', label:'Anos de Uso', type:'number'},
+      {key:'deprec_anual', label:'Depreciação Anual (R$)', type:'number', currency:true},
+      {key:'deprec_acumulada', label:'Depreciação Acumulada (R$)', type:'number', currency:true},
+      {key:'valor_residual', label:'Valor Residual (R$)', type:'number', currency:true},
+      {key:'recomendar_substituicao', label:'Recomendar Substituição', type:'select', options:['Sim','Não'], badge:true},
+      {key:'prioridade', label:'Prioridade', type:'select', options:['Baixa','Média','Alta'], badge:true},
     ],
   },
 };
 const MODULE_ORDER = ['inventario','estoque','locados','compras','licencas','transporte','impressoras','teamviewer','depreciacao'];
-
-function depreciationCalc(item){
-  const year = new Date().getFullYear();
-  const anosUso = Math.max(0, year - Number(item.ano_aquisicao || year));
-  const vidaUtil = Number(item.vida_util_anos || 5) || 5;
-  const valorAquisicao = Number(item.valor_aquisicao || 0);
-  const deprecAnual = valorAquisicao / vidaUtil;
-  const deprecAcumulada = Math.min(deprecAnual * anosUso, valorAquisicao);
-  const valorResidual = Math.max(0, valorAquisicao - deprecAcumulada);
-  const recomendar = anosUso >= vidaUtil;
-  return {anosUso, deprecAnual, deprecAcumulada, valorResidual, recomendar};
-}
 
 /* -------------------------- Formatação -------------------------- */
 const fmtCurrency = (v)=> new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(Number(v||0));
@@ -243,9 +237,9 @@ function fmtDate(v){
 }
 function statusTone(status){
   const s = (status||'').toLowerCase();
-  if(['ativo','ativa','disponível','disponivel','em uso','entregue','postado','em trânsito','em transito','ok'].some(x=>s.includes(x))) return 'ok';
-  if(['manutenção','manutencao','reservado','solicitado','aprovado'].some(x=>s.includes(x))) return 'warn';
-  if(['vencida','vencido','atrasado','extraviado','cancelado','baixado','inativo','inativa','não instalada','nao instalada'].some(x=>s.includes(x))) return 'crit';
+  if(['vencida','vencido','atrasado','extraviado','cancelado','baixado','inativo','inativa','não instalada','nao instalada','alta'].some(x=>s.includes(x))) return 'crit';
+  if(['manutenção','manutencao','reservado','solicitado','aprovado','média','media'].some(x=>s.includes(x))) return 'warn';
+  if(['ativo','ativa','disponível','disponivel','em uso','entregue','postado','em trânsito','em transito','ok','baixa'].some(x=>s.includes(x))) return 'ok';
   return 'neutral';
 }
 function esc(v){
@@ -404,22 +398,17 @@ function filteredRows(mod){
 }
 
 function columnLabel(mod, colKey){
-  if(colKey==='anos_uso') return 'Anos de uso';
-  if(colKey==='valor_residual') return 'Valor residual';
-  if(colKey==='recomendar') return 'Substituição';
   const f = mod.fields.find(f=>f.key===colKey);
   return f ? f.label : colKey;
 }
 
 function renderCell(mod, colKey, row){
-  if(mod.collection==='depreciacao' && (colKey==='anos_uso' || colKey==='valor_residual' || colKey==='recomendar')){
-    const c = depreciationCalc(row);
-    if(colKey==='anos_uso') return '<td class="num-cell">'+c.anosUso+'</td>';
-    if(colKey==='valor_residual') return '<td class="num-cell cell-mono">'+fmtCurrency(c.valorResidual)+'</td>';
-    if(colKey==='recomendar') return '<td><span class="badge '+(c.recomendar?'crit':'ok')+'">'+(c.recomendar?'Substituir':'Em vida útil')+'</span></td>';
-  }
   const f = mod.fields.find(f=>f.key===colKey);
   const val = row[colKey];
+  if(colKey==='recomendar_substituicao'){
+    const isSim = (val||'').toLowerCase()==='sim';
+    return '<td><span class="badge '+(isSim?'crit':'ok')+'">'+esc(val||'—')+'</span></td>';
+  }
   if(colKey==='senha'){
     const shown = !!state.revealed[row.id];
     const display = shown ? esc(val||'—') : '••••••••';
@@ -639,7 +628,7 @@ function renderDashboard(){
       {icon:'compras', num:compras.filter(r=>r.status_sci==='Solicitado'||r.status_sci==='Aprovado').length, lbl:'Compras em aberto'},
       {icon:'transporte', num:transporte.filter(r=>r.status==='Postado'||r.status==='Em trânsito').length, lbl:'Envios em trânsito'},
       {icon:'impressoras', num:impressoras.filter(r=>r.status==='Ativa').length, lbl:'Impressoras ativas'},
-      {icon:'depreciacao', num:depreciacao.filter(r=>depreciationCalc(r).recomendar).length, lbl:'Substituição recomendada'},
+      {icon:'depreciacao', num:depreciacao.filter(r=>r.recomendar_substituicao==='Sim').length, lbl:'Substituição recomendada'},
     ];
     document.getElementById('kpiGrid').innerHTML = kpis.map(k=>
       '<div class="kpi"><span class="icon">'+ic(k.icon)+'</span><div class="num mono">'+k.num+'</div><div class="lbl">'+esc(k.lbl)+'</div></div>'
@@ -660,7 +649,7 @@ function renderDashboard(){
     licencas.filter(r=>r.status==='Vencida').slice(0,4).forEach(r=> alerts.push('Licença <b>'+esc(r.licenca||r.tipo||'—')+'</b> vencida ('+esc(unitLabel(r.unidade))+')'));
     locados.filter(r=>r.status==='Atrasado').slice(0,4).forEach(r=> alerts.push('Devolução em atraso: <b>'+esc(r.equipamento||'—')+'</b> — '+esc(r.colaborador||'—')));
     transporte.filter(r=>r.status==='Extraviado').slice(0,3).forEach(r=> alerts.push('Envio extraviado: <b>'+esc(r.descricao_envio||'—')+'</b>'));
-    depreciacao.filter(r=>depreciationCalc(r).recomendar).slice(0,4).forEach(r=> alerts.push('Substituição recomendada: <b>'+esc(r.identificador||r.modelo||'—')+'</b>'));
+    depreciacao.filter(r=>r.recomendar_substituicao==='Sim').slice(0,4).forEach(r=> alerts.push('Substituição recomendada: <b>'+esc(r.identificador||r.modelo||'—')+'</b>'));
     const alertList = document.getElementById('alertList');
     alertList.innerHTML = alerts.length
       ? alerts.slice(0,8).map(a=>'<div class="alert-item"><span class="icon">'+ic('alert')+'</span><span>'+a+'</span></div>').join('')
