@@ -1,6 +1,6 @@
 /* =========================================================================
    TORRE DE CONTROLE — inventário, estoque, locação, compras, licenças,
-   transporte, impressoras e acessos TeamViewer das unidades GJP Hotels &
+   transporte, impressoras e acessos TeamViewer das unidades Wish Hotels &
    Resorts (Wish / Prodigy).
    Dados no Supabase (Postgres); acesso exige login (ver README).
    ========================================================================= */
@@ -13,9 +13,9 @@ const UNITS = [
   {code:'WSERRANO', label:'Wish Serrano'},
   {code:'WFOZ', label:'Wish Foz do Iguaçu'},
   {code:'PGRAMADO', label:'Prodigy Gramado'},
-  {code:'PSDU', label:'GJP Santos Dumont'},
-  {code:'LGALEAO', label:'GJP Linx Galeão'},
-  {code:'LCONFINS', label:'GJP Confins'},
+  {code:'PSDU', label:'Wish Santos Dumont'},
+  {code:'LGALEAO', label:'Wish Linx Galeão'},
+  {code:'LCONFINS', label:'Wish Confins'},
 ];
 const unitLabel = (code) => (UNITS.find(u=>u.code===code)||{}).label || code || '—';
 
@@ -368,7 +368,7 @@ function renderTopbar(){
   const mod = state.moduleKey==='dashboard' ? null : MODULES[state.moduleKey];
   document.getElementById('topbarIcon').innerHTML = ic(mod?mod.icon:'dashboard');
   document.getElementById('topbarTitle').textContent = mod?mod.title:'Painel geral';
-  document.getElementById('topbarSub').textContent = mod?mod.sub:'Visão consolidada de todas as unidades GJP Hotels & Resorts';
+  document.getElementById('topbarSub').textContent = mod?mod.sub:'Visão consolidada de todas as unidades Wish Hotels & Resorts';
 
   const ctrls = document.getElementById('topbarControls');
   if(!mod){ ctrls.innerHTML=''; return; }

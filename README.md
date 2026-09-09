@@ -2,7 +2,7 @@
 
 Sistema interno da Sustentação para controle de **inventário, estoque, equipamentos
 locados, compras, licenças, transporte, impressoras e acessos TeamViewer** das
-unidades GJP Hotels & Resorts (Wish / Prodigy).
+unidades Wish Hotels & Resorts.
 
 Site estático (HTML/CSS/JS, sem build) + banco de dados [Supabase](https://supabase.com)
 (Postgres gratuito, com login e atualização em tempo real). Feito para rodar no
