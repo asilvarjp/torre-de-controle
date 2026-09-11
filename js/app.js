@@ -253,14 +253,16 @@ const MODULE_ORDER = ['inventario','estoque','locados','compras','licencas','tra
 
 /* -------------------------- Custo de substituição de ativos -------------------------- */
 // Menor preço por item entre os fornecedores do Mapa de Cotação (MINI DESKTOP MAIS
-// SERVIÇOS): Desktop já cotado com garantia estendida (Concórdia, 3 anos) + Licença
-// Office (Scansource) + Device CAL (Scansource). Atualize aqui quando cotar de novo.
+// SERVIÇOS): Desktop já cotado com garantia estendida (Concórdia, 3 anos) + Monitor
+// (Scansource) + Licença Office (Scansource) + Device CAL (Scansource). Atualize aqui
+// quando cotar de novo.
 const REPLACEMENT_COST = {
   desktop:   {valor:6579.00, fornecedor:'Concórdia', desc:'Desktop Dell Pro Micro i5 16GB 512GB Win 11 Pro c/ garantia estendida 3 anos'},
+  monitor:   {valor: 830.00, fornecedor:'Scansource', desc:'Monitor Dell E2225HSM 21.5" c/ ajuste de cabo HDMI'},
   office:    {valor:1269.00, fornecedor:'Scansource', desc:'Office Home and Business 2024 ESD Perpétua'},
   deviceCal: {valor: 353.90, fornecedor:'Scansource', desc:'Windows Server 2025 — 1 Device CAL'},
 };
-const REPLACEMENT_UNIT_TOTAL = REPLACEMENT_COST.desktop.valor + REPLACEMENT_COST.office.valor + REPLACEMENT_COST.deviceCal.valor;
+const REPLACEMENT_UNIT_TOTAL = REPLACEMENT_COST.desktop.valor + REPLACEMENT_COST.monitor.valor + REPLACEMENT_COST.office.valor + REPLACEMENT_COST.deviceCal.valor;
 
 /* -------------------------- Formatação -------------------------- */
 const fmtCurrency = (v)=> new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(Number(v||0));
@@ -487,7 +489,7 @@ function renderInvestmentPanel(){
 
   return '<div class="panel invest-panel">'+
     '<h2>Investimento estimado para substituição</h2>'+
-    '<div class="panel-sub">'+recRows.length+' máquina'+(recRows.length===1?'':'s')+' recomendada'+(recRows.length===1?'':'s')+' × '+fmtCurrency(REPLACEMENT_UNIT_TOTAL)+'/máquina — desktop c/ garantia estendida + licença Office + Device CAL (menor cotação por item)</div>'+
+    '<div class="panel-sub">'+recRows.length+' máquina'+(recRows.length===1?'':'s')+' recomendada'+(recRows.length===1?'':'s')+' × '+fmtCurrency(REPLACEMENT_UNIT_TOTAL)+'/máquina — desktop c/ garantia estendida + monitor + licença Office + Device CAL (menor cotação por item)</div>'+
     rowsHtml+
     (unitKeys.length ? '<div class="invest-total">Total estimado: <b>'+fmtCurrency(recRows.length*REPLACEMENT_UNIT_TOTAL)+'</b></div>' : '')+
     '</div>';
