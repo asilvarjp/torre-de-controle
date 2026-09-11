@@ -175,6 +175,26 @@ create table if not exists public.depreciacao (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.linhas (
+  id uuid primary key default gen_random_uuid(),
+  tipo_linha text,
+  empresa text,
+  ddd text,
+  numero text,
+  unidade text,
+  usuario text,
+  funcao text,
+  depto text,
+  conta text,
+  plano text,
+  cnpj text,
+  valor numeric,
+  valor_gasto numeric,
+  status text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 -- Colunas adicionadas depois da primeira versão do schema — seguro rodar
 -- de novo mesmo se a tabela já existir com as colunas antigas apenas.
 alter table public.depreciacao add column if not exists anos_uso integer;
@@ -197,7 +217,7 @@ begin
   for t in
     select unnest(array[
       'inventario','estoque','locados','compras','licencas',
-      'transporte','impressoras','teamviewer','depreciacao'
+      'transporte','impressoras','teamviewer','depreciacao','linhas'
     ])
   loop
     execute format('drop trigger if exists trg_set_updated_at on public.%I', t);
@@ -225,7 +245,7 @@ begin
   for t in
     select unnest(array[
       'inventario','estoque','locados','compras','licencas',
-      'transporte','impressoras','teamviewer','depreciacao'
+      'transporte','impressoras','teamviewer','depreciacao','linhas'
     ])
   loop
     begin

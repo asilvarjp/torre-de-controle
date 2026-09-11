@@ -30,6 +30,7 @@ const ICONS = {
   impressoras:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V4h12v5"/><rect x="4" y="9" width="16" height="7" rx="1.2"/><path d="M7 16h10v5H7z"/></svg>',
   teamviewer:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="1.5"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="16" x2="12" y2="20"/><path d="M9.5 7.5l4 2.7-1.6.6 1.6 2.4-1.1.7-1.6-2.4-1.3 1.3z" fill="currentColor" stroke="none"/></svg>',
   depreciacao:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5v14h16"/><polyline points="6,8 10,13 13,10 19,17"/><polyline points="14,17 19,17 19,12"/></svg>',
+  linhas:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6.6 10.8c1.8 3.6 4.6 6.4 8.2 8.2l2.4-2.4a1.2 1.2 0 0 1 1.3-.3c1.3.4 2.7.6 4.2.6a1.3 1.3 0 0 1 1.3 1.3V22a1.3 1.3 0 0 1-1.3 1.3C11.6 23.3.7 12.4.7 2.3A1.3 1.3 0 0 1 2 1h3.8A1.3 1.3 0 0 1 7 2.3c0 1.5.2 2.9.6 4.2a1.2 1.2 0 0 1-.3 1.3z"/></svg>',
   plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',
   edit:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l4-1 11-11-3-3L5 16l-1 4z"/></svg>',
   trash:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/></svg>',
@@ -224,8 +225,31 @@ const MODULES = {
       {key:'prioridade', label:'Prioridade', type:'select', options:['Baixa','Média','Alta'], badge:true},
     ],
   },
+  linhas:{
+    label:'Linhas Wish', icon:'linhas', collection:'linhas',
+    title:'Linhas telefônicas', sub:'Linhas corporativas — Corporativo/Hotéis e Exclusive Guest',
+    unitField:'unidade', statusField:'status',
+    searchFields:['numero','usuario','depto','conta'],
+    columns:['tipo_linha','unidade','numero','usuario','depto','status','valor'],
+    fields:[
+      {key:'tipo_linha', label:'Linha', type:'select', options:['Corporativo e Hotéis','Exclusive Guest'], required:true, badge:true},
+      {key:'numero', label:'Número', type:'text', required:true, mono:true},
+      {key:'ddd', label:'DDD', type:'text', mono:true},
+      {key:'empresa', label:'Empresa', type:'text'},
+      {key:'unidade', label:'Unidade', type:'unidade'},
+      {key:'usuario', label:'Usuário', type:'text'},
+      {key:'funcao', label:'Função', type:'text'},
+      {key:'depto', label:'Departamento', type:'text'},
+      {key:'conta', label:'Conta', type:'text', mono:true},
+      {key:'plano', label:'Plano', type:'text'},
+      {key:'cnpj', label:'CNPJ', type:'text', mono:true},
+      {key:'valor', label:'Valor (R$)', type:'number', currency:true},
+      {key:'valor_gasto', label:'Valor Gasto (R$)', type:'number', currency:true},
+      {key:'status', label:'Status', type:'select', options:['Ativa','Suspensa','Cancelada'], badge:true},
+    ],
+  },
 };
-const MODULE_ORDER = ['inventario','estoque','locados','compras','licencas','transporte','impressoras','teamviewer','depreciacao'];
+const MODULE_ORDER = ['inventario','estoque','locados','compras','licencas','transporte','impressoras','teamviewer','depreciacao','linhas'];
 
 /* -------------------------- Formatação -------------------------- */
 const fmtCurrency = (v)=> new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(Number(v||0));
@@ -590,7 +614,7 @@ function toast(msg, isErr){
 
 /* -------------------------- Dashboard -------------------------- */
 async function loadDashboard(){
-  const cols = ['inventario','estoque','locados','compras','licencas','transporte','impressoras','teamviewer','depreciacao'];
+  const cols = ['inventario','estoque','locados','compras','licencas','transporte','impressoras','teamviewer','depreciacao','linhas'];
   const results = {};
   await Promise.all(cols.map(async c=>{
     const { data, error } = await supabaseClient.from(c).select('*');
@@ -620,6 +644,7 @@ function renderDashboard(){
     const transporte = data.transporte || [];
     const impressoras = data.impressoras || [];
     const depreciacao = data.depreciacao || [];
+    const linhas = data.linhas || [];
 
     const kpis = [
       {icon:'inventario', num:inv.length, lbl:'Ativos cadastrados'},
@@ -629,6 +654,7 @@ function renderDashboard(){
       {icon:'transporte', num:transporte.filter(r=>r.status==='Postado'||r.status==='Em trânsito').length, lbl:'Envios em trânsito'},
       {icon:'impressoras', num:impressoras.filter(r=>r.status==='Ativa').length, lbl:'Impressoras ativas'},
       {icon:'depreciacao', num:depreciacao.filter(r=>r.recomendar_substituicao==='Sim').length, lbl:'Substituição recomendada'},
+      {icon:'linhas', num:linhas.filter(r=>(r.status||'').toLowerCase().startsWith('ativa')).length, lbl:'Linhas ativas'},
     ];
     document.getElementById('kpiGrid').innerHTML = kpis.map(k=>
       '<div class="kpi"><span class="icon">'+ic(k.icon)+'</span><div class="num mono">'+k.num+'</div><div class="lbl">'+esc(k.lbl)+'</div></div>'

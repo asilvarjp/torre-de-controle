@@ -134,6 +134,7 @@ serve.ps1              servidor local só para testes (não é usado no GitHub P
 | Impressoras | Impressoras por unidade (série, IP, contadores A4) |
 | TeamViewer | ID e senha de acesso remoto por máquina (senha oculta por padrão) |
 | Depreciação | Vida útil, valor residual e recomendação de substituição de ativos |
+| Linhas Wish | Linhas telefônicas corporativas — Corporativo/Hotéis e Exclusive Guest |
 
 ## Segurança — leia antes de usar em produção
 
