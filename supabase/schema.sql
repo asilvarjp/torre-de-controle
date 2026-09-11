@@ -91,12 +91,14 @@ create table if not exists public.compras (
   unidade text,
   centro_custo text,
   data_pedido date,
+  valor numeric,
   solicitante text,
   comprador text,
   status_sci text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+alter table public.compras add column if not exists valor numeric;
 
 create table if not exists public.licencas (
   id uuid primary key default gen_random_uuid(),

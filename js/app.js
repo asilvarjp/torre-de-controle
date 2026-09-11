@@ -119,7 +119,7 @@ const MODULES = {
     title:'Compras', sub:'Solicitações de compra — SCI, ordem de compra e status',
     unitField:'unidade', statusField:'status_sci',
     searchFields:['descricao_item','sci','oc','solicitante','comprador'],
-    columns:['descricao_item','sci','oc','unidade','data_pedido','status_sci'],
+    columns:['descricao_item','sci','oc','unidade','data_pedido','valor','status_sci'],
     fields:[
       {key:'descricao_item', label:'Descrição do item', type:'text', required:true, full:true},
       {key:'sci', label:'SCI', type:'text', mono:true},
@@ -128,6 +128,7 @@ const MODULES = {
       {key:'unidade', label:'Unidade', type:'unidade'},
       {key:'centro_custo', label:'Centro de custo', type:'text'},
       {key:'data_pedido', label:'Data do pedido', type:'date'},
+      {key:'valor', label:'Valor (R$)', type:'number', currency:true},
       {key:'solicitante', label:'Solicitante', type:'text'},
       {key:'comprador', label:'Comprador', type:'text'},
       {key:'status_sci', label:'Status da SCI', type:'select', options:['Solicitado','Aprovado','Comprado','Entregue','Cancelado'], badge:true},
@@ -338,6 +339,7 @@ const state = {
   unsub:null,
   revealed:{},
   onlyRecommend:false,
+  itemFilter:'',
 };
 const moduleCounts = {};
 
@@ -365,6 +367,7 @@ function renderSidebar(){
 function switchModule(key){
   state.moduleKey = key;
   state.search = '';
+  state.itemFilter = '';
   if(typeof state.unsub === 'function'){ state.unsub(); state.unsub = null; }
   renderSidebar();
   renderTopbar();
@@ -378,6 +381,7 @@ function subscribeModule(key){
   state.unsub = Store.subscribe(mod.collection, (rows)=>{
     state.rows = rows;
     moduleCounts[key] = rows.length;
+    if(mod.collection==='compras') refreshItemFilterSelect();
     renderModuleTable(key);
     updateNavCounts();
   });
@@ -415,6 +419,9 @@ function renderTopbar(){
   if(mod.collection==='depreciacao'){
     html += '<label class="check-filter"><input type="checkbox" id="onlyRecommendChk" '+(state.onlyRecommend?'checked':'')+'/> Só substituição recomendada</label>';
   }
+  if(mod.collection==='compras'){
+    html += '<select id="itemFilterSel" class="field-select"><option value="">Todos os itens</option>'+itemFilterOptionsHtml()+'</select>';
+  }
   html += '<div class="search-box"><span class="icon">'+ic('search')+'</span><input id="searchInput" type="text" placeholder="Buscar…" value="'+esc(state.search)+'"/></div>';
   html += '<button class="btn btn-primary" id="btnNew"><span class="icon">'+ic('plus')+'</span>Novo</button>';
   ctrls.innerHTML = html;
@@ -423,8 +430,21 @@ function renderTopbar(){
   if(selEl) selEl.addEventListener('change', e=>{ state.unidadeFilter = e.target.value; renderModuleTable(state.moduleKey); });
   const onlyRecEl = document.getElementById('onlyRecommendChk');
   if(onlyRecEl) onlyRecEl.addEventListener('change', e=>{ state.onlyRecommend = e.target.checked; renderModuleTable(state.moduleKey); });
+  const itemEl = document.getElementById('itemFilterSel');
+  if(itemEl) itemEl.addEventListener('change', e=>{ state.itemFilter = e.target.value; renderModuleTable(state.moduleKey); });
   document.getElementById('searchInput').addEventListener('input', e=>{ state.search = e.target.value; renderModuleTable(state.moduleKey); });
   document.getElementById('btnNew').addEventListener('click', ()=> openForm(state.moduleKey, null));
+}
+
+// Opções (itens distintos comprados) para o filtro do módulo Compras.
+function itemFilterOptionsHtml(){
+  const items = Array.from(new Set(state.rows.map(r=> (r.descricao_item||'').trim()).filter(Boolean))).sort((a,b)=> a.localeCompare(b,'pt-BR'));
+  return items.map(v=> '<option value="'+esc(v)+'" '+(state.itemFilter===v?'selected':'')+'>'+esc(v)+'</option>').join('');
+}
+function refreshItemFilterSelect(){
+  const sel = document.getElementById('itemFilterSel');
+  if(!sel) return;
+  sel.innerHTML = '<option value="">Todos os itens</option>'+itemFilterOptionsHtml();
 }
 
 /* -------------------------- Tabela de módulo -------------------------- */
@@ -435,6 +455,9 @@ function filteredRows(mod){
   }
   if(mod.collection==='depreciacao' && state.onlyRecommend){
     rows = rows.filter(r=> r.recomendar_substituicao==='Sim');
+  }
+  if(mod.collection==='compras' && state.itemFilter){
+    rows = rows.filter(r=> (r.descricao_item||'').trim()===state.itemFilter);
   }
   const q = state.search.trim().toLowerCase();
   if(q){
@@ -495,17 +518,62 @@ function renderInvestmentPanel(){
     '</div>';
 }
 
+const MONTH_NAMES_PT = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+function renderComprasSummaryPanel(){
+  // Respeita os filtros de unidade e de item (não a busca livre), para sempre
+  // mostrar o total investido no recorte que o usuário selecionou.
+  let base = state.rows.slice();
+  if(state.unidadeFilter){ base = base.filter(r=> r.unidade===state.unidadeFilter); }
+  if(state.itemFilter){ base = base.filter(r=> (r.descricao_item||'').trim()===state.itemFilter); }
+
+  const byMonth = {};
+  let semData = 0, semValor = 0;
+  base.forEach(r=>{
+    const m = String(r.data_pedido||'').match(/^(\d{4})-(\d{2})/);
+    if(!m){ semData++; return; }
+    const key = m[1]+'-'+m[2];
+    if(!byMonth[key]) byMonth[key] = {qtd:0, total:0};
+    byMonth[key].qtd++;
+    byMonth[key].total += Number(r.valor||0);
+    if(r.valor==null || r.valor==='') semValor++;
+  });
+  const keys = Object.keys(byMonth).sort().reverse();
+  const grandTotal = base.reduce((s,r)=> s + Number(r.valor||0), 0);
+
+  const rowsHtml = keys.length
+    ? keys.map(k=>{
+        const [y,mo] = k.split('-');
+        const label = MONTH_NAMES_PT[Number(mo)-1]+' '+y;
+        const d = byMonth[k];
+        return '<div class="bar-row"><div class="bl">'+esc(label)+'</div><div class="bv mono">'+d.qtd+' pedido'+(d.qtd===1?'':'s')+'</div><div class="bv mono" style="width:auto;min-width:110px;">'+fmtCurrency(d.total)+'</div></div>';
+      }).join('')
+    : '<div class="empty-note">Nenhum pedido com data cadastrada'+(state.unidadeFilter||state.itemFilter?' neste filtro':'')+'.</div>';
+
+  let note = '';
+  if(semValor>0) note = '<div class="empty-note">'+semValor+' pedido'+(semValor===1?'':'s')+' sem valor preenchido (não entra'+(semValor===1?'':'m')+' no total).</div>';
+  if(semData>0) note += '<div class="empty-note">'+semData+' pedido'+(semData===1?'':'s')+' sem data — não aparece'+(semData===1?'':'m')+' no agrupamento por mês.</div>';
+
+  return '<div class="panel invest-panel">'+
+    '<h2>Valor investido por mês</h2>'+
+    '<div class="panel-sub">'+base.length+' pedido'+(base.length===1?'':'s')+(state.itemFilter?' de "'+esc(state.itemFilter)+'"':'')+(state.unidadeFilter?' em '+esc(unitLabel(state.unidadeFilter)):'')+'</div>'+
+    rowsHtml+ note +
+    (keys.length ? '<div class="invest-total">Total no período: <b>'+fmtCurrency(grandTotal)+'</b></div>' : '')+
+    '</div>';
+}
+
 function renderModuleTable(key){
   if(key !== state.moduleKey) return;
   const mod = MODULES[key];
   const rows = filteredRows(mod);
   const content = document.getElementById('content');
 
-  let html = mod.collection==='depreciacao' ? renderInvestmentPanel() : '';
+  let html = '';
+  if(mod.collection==='depreciacao') html = renderInvestmentPanel();
+  else if(mod.collection==='compras') html = renderComprasSummaryPanel();
   html += '<div class="table-wrap">';
   if(rows.length === 0){
     html += '<div class="table-empty"><span class="icon">'+ic(mod.icon)+'</span><b>Nenhum registro encontrado</b>'+
-      (state.search||state.unidadeFilter ? 'Ajuste os filtros ou a busca.' : 'Clique em "Novo" para cadastrar o primeiro registro.')+'</div>';
+      (state.search||state.unidadeFilter||state.itemFilter ? 'Ajuste os filtros ou a busca.' : 'Clique em "Novo" para cadastrar o primeiro registro.')+'</div>';
   } else {
     html += '<div class="result-count">'+rows.length+' registro'+(rows.length===1?'':'s')+'</div>';
     html += '<div class="table-scroll"><table><thead><tr>';
