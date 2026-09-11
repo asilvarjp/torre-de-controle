@@ -251,6 +251,17 @@ const MODULES = {
 };
 const MODULE_ORDER = ['inventario','estoque','locados','compras','licencas','transporte','impressoras','teamviewer','depreciacao','linhas'];
 
+/* -------------------------- Custo de substituição de ativos -------------------------- */
+// Menor preço por item entre os fornecedores do Mapa de Cotação (MINI DESKTOP MAIS
+// SERVIÇOS): Desktop já cotado com garantia estendida (Concórdia, 3 anos) + Licença
+// Office (Scansource) + Device CAL (Scansource). Atualize aqui quando cotar de novo.
+const REPLACEMENT_COST = {
+  desktop:   {valor:6579.00, fornecedor:'Concórdia', desc:'Desktop Dell Pro Micro i5 16GB 512GB Win 11 Pro c/ garantia estendida 3 anos'},
+  office:    {valor:1269.00, fornecedor:'Scansource', desc:'Office Home and Business 2024 ESD Perpétua'},
+  deviceCal: {valor: 353.90, fornecedor:'Scansource', desc:'Windows Server 2025 — 1 Device CAL'},
+};
+const REPLACEMENT_UNIT_TOTAL = REPLACEMENT_COST.desktop.valor + REPLACEMENT_COST.office.valor + REPLACEMENT_COST.deviceCal.valor;
+
 /* -------------------------- Formatação -------------------------- */
 const fmtCurrency = (v)=> new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(Number(v||0));
 function fmtDate(v){
@@ -324,6 +335,7 @@ const state = {
   rows:[],
   unsub:null,
   revealed:{},
+  onlyRecommend:false,
 };
 const moduleCounts = {};
 
@@ -398,12 +410,17 @@ function renderTopbar(){
     UNITS.forEach(u=> html += '<option value="'+u.code+'" '+(state.unidadeFilter===u.code?'selected':'')+'>'+esc(u.label)+'</option>');
     html += '</select>';
   }
+  if(mod.collection==='depreciacao'){
+    html += '<label class="check-filter"><input type="checkbox" id="onlyRecommendChk" '+(state.onlyRecommend?'checked':'')+'/> Só substituição recomendada</label>';
+  }
   html += '<div class="search-box"><span class="icon">'+ic('search')+'</span><input id="searchInput" type="text" placeholder="Buscar…" value="'+esc(state.search)+'"/></div>';
   html += '<button class="btn btn-primary" id="btnNew"><span class="icon">'+ic('plus')+'</span>Novo</button>';
   ctrls.innerHTML = html;
 
   const selEl = document.getElementById('unidadeFilterSel');
   if(selEl) selEl.addEventListener('change', e=>{ state.unidadeFilter = e.target.value; renderModuleTable(state.moduleKey); });
+  const onlyRecEl = document.getElementById('onlyRecommendChk');
+  if(onlyRecEl) onlyRecEl.addEventListener('change', e=>{ state.onlyRecommend = e.target.checked; renderModuleTable(state.moduleKey); });
   document.getElementById('searchInput').addEventListener('input', e=>{ state.search = e.target.value; renderModuleTable(state.moduleKey); });
   document.getElementById('btnNew').addEventListener('click', ()=> openForm(state.moduleKey, null));
 }
@@ -413,6 +430,9 @@ function filteredRows(mod){
   let rows = state.rows.slice();
   if(mod.unitField && state.unidadeFilter){
     rows = rows.filter(r=> r[mod.unitField]===state.unidadeFilter);
+  }
+  if(mod.collection==='depreciacao' && state.onlyRecommend){
+    rows = rows.filter(r=> r.recomendar_substituicao==='Sim');
   }
   const q = state.search.trim().toLowerCase();
   if(q){
@@ -450,13 +470,37 @@ function renderCell(mod, colKey, row){
   return '<td>'+esc(val || '—')+'</td>';
 }
 
+function renderInvestmentPanel(){
+  // Baseado no filtro de unidade atual (ignora busca e o toggle "só recomendadas",
+  // para sempre refletir o investimento de TODAS as máquinas recomendadas na unidade em foco).
+  let base = state.rows.slice();
+  if(state.unidadeFilter){ base = base.filter(r=> r.unidade===state.unidadeFilter); }
+  const recRows = base.filter(r=> r.recomendar_substituicao==='Sim');
+
+  const byUnit = {};
+  recRows.forEach(r=>{ const k = r.unidade || '—'; byUnit[k] = (byUnit[k]||0) + 1; });
+  const unitKeys = Object.keys(byUnit).sort((a,b)=> byUnit[b]-byUnit[a]);
+
+  const rowsHtml = unitKeys.length
+    ? unitKeys.map(k=> '<div class="bar-row"><div class="bl">'+esc(unitLabel(k))+'</div><div class="bv mono">'+byUnit[k]+' máq.</div><div class="bv mono" style="width:auto;min-width:110px;">'+fmtCurrency(byUnit[k]*REPLACEMENT_UNIT_TOTAL)+'</div></div>').join('')
+    : '<div class="empty-note">Nenhuma máquina recomendada para substituição'+(state.unidadeFilter?' nesta unidade':'')+'.</div>';
+
+  return '<div class="panel invest-panel">'+
+    '<h2>Investimento estimado para substituição</h2>'+
+    '<div class="panel-sub">'+recRows.length+' máquina'+(recRows.length===1?'':'s')+' recomendada'+(recRows.length===1?'':'s')+' × '+fmtCurrency(REPLACEMENT_UNIT_TOTAL)+'/máquina — desktop c/ garantia estendida + licença Office + Device CAL (menor cotação por item)</div>'+
+    rowsHtml+
+    (unitKeys.length ? '<div class="invest-total">Total estimado: <b>'+fmtCurrency(recRows.length*REPLACEMENT_UNIT_TOTAL)+'</b></div>' : '')+
+    '</div>';
+}
+
 function renderModuleTable(key){
   if(key !== state.moduleKey) return;
   const mod = MODULES[key];
   const rows = filteredRows(mod);
   const content = document.getElementById('content');
 
-  let html = '<div class="table-wrap">';
+  let html = mod.collection==='depreciacao' ? renderInvestmentPanel() : '';
+  html += '<div class="table-wrap">';
   if(rows.length === 0){
     html += '<div class="table-empty"><span class="icon">'+ic(mod.icon)+'</span><b>Nenhum registro encontrado</b>'+
       (state.search||state.unidadeFilter ? 'Ajuste os filtros ou a busca.' : 'Clique em "Novo" para cadastrar o primeiro registro.')+'</div>';
