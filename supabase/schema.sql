@@ -100,6 +100,20 @@ create table if not exists public.compras (
 );
 alter table public.compras add column if not exists valor numeric;
 
+-- Nenhuma coluna acima (fora id/created_at/updated_at) deve ser obrigatória —
+-- garante isso mesmo se alguém marcou "NOT NULL" sem querer pelo Table Editor.
+alter table public.compras alter column descricao_item drop not null;
+alter table public.compras alter column sci drop not null;
+alter table public.compras alter column oc drop not null;
+alter table public.compras alter column qtde drop not null;
+alter table public.compras alter column unidade drop not null;
+alter table public.compras alter column centro_custo drop not null;
+alter table public.compras alter column data_pedido drop not null;
+alter table public.compras alter column valor drop not null;
+alter table public.compras alter column solicitante drop not null;
+alter table public.compras alter column comprador drop not null;
+alter table public.compras alter column status_sci drop not null;
+
 create table if not exists public.licencas (
   id uuid primary key default gen_random_uuid(),
   tipo text,

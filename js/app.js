@@ -602,7 +602,7 @@ function renderModuleTable(key){
     const ok = await confirmDialog('Excluir o registro "'+label+'"? Esta ação não pode ser desfeita.');
     if(!ok) return;
     try{ await Store.remove(mod.collection, row.id); toast('Registro excluído.'); }
-    catch(e){ console.error(e); toast('Não foi possível excluir.', true); }
+    catch(e){ console.error(e); toast('Não foi possível excluir.'+((e&&e.message)?' ('+e.message+')':''), true); }
   }));
   content.querySelectorAll('.reveal-btn').forEach(b=> b.addEventListener('click', ()=>{
     state.revealed[b.dataset.id] = !state.revealed[b.dataset.id];
@@ -694,7 +694,8 @@ function openForm(key, existing){
       close();
     }catch(e){
       console.error(e);
-      toast('Não foi possível salvar o registro.', true);
+      const detail = (e && e.message) ? ' ('+e.message+')' : '';
+      toast('Não foi possível salvar o registro.'+detail, true);
     }
   });
 }
