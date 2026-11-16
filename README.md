@@ -152,6 +152,11 @@ navegador):
 - Tudo que é excluído (de qualquer módulo, inclusive por SQL) é copiado para a
   **Lixeira** antes de sumir. Em **Administração → Lixeira**, um administrador
   restaura o item no módulo de origem com um clique.
+- **Administração → Atividades** mostra quem acessou e quem cadastrou, editou,
+  excluiu ou restaurou cada item, com data e hora. Nas edições aparece o que
+  mudou (de → para). Senhas nunca vão para o registro. É gravado por gatilhos
+  no banco, então ninguém consegue burlar ou apagar pelo navegador. Para limpar
+  registros antigos (opcional): `select public.limpar_auditoria(365);`
 - Para recuperar o acesso de administrador pelo SQL Editor do Supabase:
   `update public.perfis set papel = 'admin' where email = 'seu@email';`
 

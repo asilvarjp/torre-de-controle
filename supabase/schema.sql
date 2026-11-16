@@ -367,6 +367,9 @@ begin
     raise exception 'Tabela inválida: %', r.tabela;
   end if;
 
+  -- avisa o registro de atividades que este insert é uma restauração
+  perform set_config('app.restaurando', '1', true);
+
   execute format(
     'insert into public.%I select * from jsonb_populate_record(null::public.%I, $1)',
     r.tabela, r.tabela
@@ -380,6 +383,149 @@ $$;
 
 revoke all on function public.restaurar_da_lixeira(uuid) from public, anon;
 grant execute on function public.restaurar_da_lixeira(uuid) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- REGISTRO DE ATIVIDADES (auditoria): quem acessou e quem criou, editou,
+-- excluiu ou restaurou o quê, e quando.
+--   · Feito por gatilhos no banco — não depende do navegador e não pode ser
+--     burlado nem apagado por quem usa o sistema.
+--   · Leve: 1 gravação pequena por alteração. Nas edições guarda só os campos
+--     que mudaram (de → para). Senhas nunca são gravadas no registro.
+--   · Só administradores conseguem ler (tela Administração → Atividades).
+-- ---------------------------------------------------------------------------
+create table if not exists public.auditoria (
+  id bigint generated always as identity primary key,
+  em timestamptz not null default now(),
+  usuario_id uuid,
+  usuario_email text,
+  tabela text,
+  registro_id uuid,
+  acao text not null check (acao in ('acessou','criou','editou','excluiu','restaurou')),
+  rotulo text,
+  detalhes jsonb
+);
+create index if not exists auditoria_em_idx on public.auditoria (em desc);
+create index if not exists auditoria_tabela_em_idx on public.auditoria (tabela, em desc);
+create index if not exists auditoria_usuario_em_idx on public.auditoria (usuario_id, em desc);
+alter table public.auditoria enable row level security;
+
+drop policy if exists "auditoria_ler" on public.auditoria;
+create policy "auditoria_ler" on public.auditoria
+  for select to authenticated
+  using (public.meu_papel() = 'admin');
+
+create or replace function public.registrar_auditoria()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_acao text;
+  v_reg uuid;
+  v_row jsonb;
+  v_old jsonb;
+  v_det jsonb;
+  v_chg jsonb := '{}'::jsonb;
+  k text;
+begin
+  if tg_op = 'INSERT' then
+    v_row := to_jsonb(new);
+    v_reg := new.id;
+    v_acao := case when current_setting('app.restaurando', true) = '1' then 'restaurou' else 'criou' end;
+    v_det := v_row - 'senha' - 'id' - 'created_at' - 'updated_at';
+  elsif tg_op = 'UPDATE' then
+    v_row := to_jsonb(new);
+    v_old := to_jsonb(old);
+    v_reg := new.id;
+    v_acao := 'editou';
+    for k in select key from jsonb_each(v_row) loop
+      continue when k in ('updated_at', 'created_at');
+      if (v_row -> k) is distinct from (v_old -> k) then
+        if k = 'senha' then
+          v_chg := v_chg || jsonb_build_object(k, jsonb_build_object('de', '***', 'para', '***'));
+        else
+          v_chg := v_chg || jsonb_build_object(k, jsonb_build_object('de', v_old -> k, 'para', v_row -> k));
+        end if;
+      end if;
+    end loop;
+    if v_chg = '{}'::jsonb then
+      return null;  -- nada mudou de verdade: não registra
+    end if;
+    v_det := v_chg;
+  else
+    v_row := to_jsonb(old);
+    v_reg := old.id;
+    v_acao := 'excluiu';
+    v_det := null;  -- o conteúdo completo fica na Lixeira
+  end if;
+
+  insert into public.auditoria (usuario_id, usuario_email, tabela, registro_id, acao, rotulo, detalhes)
+  values (
+    auth.uid(),
+    coalesce(auth.jwt() ->> 'email', 'SQL Editor / sistema'),
+    tg_table_name,
+    v_reg,
+    v_acao,
+    coalesce(
+      v_row ->> 'hostname', v_row ->> 'patrimonio', v_row ->> 'descricao_item',
+      v_row ->> 'equipamento', v_row ->> 'identificador', v_row ->> 'numero',
+      v_row ->> 'impressora', v_row ->> 'licenca', v_row ->> 'descricao_envio'
+    ),
+    v_det
+  );
+  return null;
+end;
+$$;
+
+-- Chamada pelo sistema quando alguém entra. Ignora se a mesma pessoa já foi
+-- registrada nos últimos 30 minutos (recarregar a página não enche o registro).
+create or replace function public.registrar_acesso()
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    return;
+  end if;
+  if exists (
+    select 1 from public.auditoria
+    where usuario_id = auth.uid() and acao = 'acessou' and em > now() - interval '30 minutes'
+  ) then
+    return;
+  end if;
+  insert into public.auditoria (usuario_id, usuario_email, acao, detalhes)
+  values (auth.uid(), auth.jwt() ->> 'email', 'acessou', jsonb_build_object('perfil', public.meu_papel()));
+end;
+$$;
+
+revoke all on function public.registrar_acesso() from public, anon;
+grant execute on function public.registrar_acesso() to authenticated;
+
+-- Limpeza opcional (só admin): apaga registros mais antigos que N dias.
+--   select public.limpar_auditoria(365);
+create or replace function public.limpar_auditoria(p_dias integer default 365)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  n integer;
+begin
+  if public.meu_papel() <> 'admin' then
+    raise exception 'Apenas administradores podem limpar o registro de atividades';
+  end if;
+  delete from public.auditoria where em < now() - make_interval(days => p_dias);
+  get diagnostics n = row_count;
+  return n;
+end;
+$$;
+
+revoke all on function public.limpar_auditoria(integer) from public, anon;
+grant execute on function public.limpar_auditoria(integer) to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- Trigger de updated_at + lixeira + Row Level Security por perfil, aplicados
@@ -408,6 +554,11 @@ begin
     execute format('drop trigger if exists trg_lixeira on public.%I', t);
     execute format(
       'create trigger trg_lixeira before delete on public.%I for each row execute function public.mover_para_lixeira()',
+      t
+    );
+    execute format('drop trigger if exists trg_auditoria on public.%I', t);
+    execute format(
+      'create trigger trg_auditoria after insert or update or delete on public.%I for each row execute function public.registrar_auditoria()',
       t
     );
     execute format('alter table public.%I enable row level security', t);

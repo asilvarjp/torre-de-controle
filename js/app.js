@@ -43,6 +43,7 @@ const ICONS = {
   alert:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10.6 3.9L2.4 18.5A1.5 1.5 0 0 0 3.7 21h16.6a1.5 1.5 0 0 0 1.3-2.5L13.4 3.9a1.5 1.5 0 0 0-2.8 0z"/><line x1="12" y1="9.5" x2="12" y2="13.5"/><circle cx="12" cy="16.5" r=".2" fill="currentColor" stroke-width="2.2"/></svg>',
   logout:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16,17 21,12 16,7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>',
   usuarios:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8"/><path d="M18 14.2a6.5 6.5 0 0 1 3.5 5.8"/></svg>',
+  historico:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12,7 12,12 15.5,14"/></svg>',
   undo:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h11a5 5 0 0 1 0 10H8"/><polyline points="8,5 4,9 8,13"/></svg>',
   lock:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>',
 };
@@ -257,6 +258,7 @@ const MODULE_ORDER = ['inventario','estoque','locados','compras','licencas','tra
 // Telas de administração (só aparecem para o perfil "admin").
 const SPECIAL_VIEWS = {
   usuarios:{label:'Usuários', icon:'usuarios', title:'Usuários e permissões', sub:'Defina o que cada pessoa pode fazer no sistema'},
+  atividades:{label:'Atividades', icon:'historico', title:'Registro de atividades', sub:'Quem acessou e quem cadastrou, editou, excluiu ou restaurou cada item'},
   lixeira:{label:'Lixeira', icon:'trash', title:'Lixeira', sub:'Itens excluídos — restaure se a exclusão foi um engano'},
 };
 
@@ -422,6 +424,7 @@ function switchModule(key){
   renderTopbar();
   if(key === 'dashboard'){ renderDashboard(); }
   else if(key === 'usuarios'){ renderUsuarios(); }
+  else if(key === 'atividades'){ renderAtividades(); }
   else if(key === 'lixeira'){ renderLixeira(); }
   else { subscribeModule(key); }
 }
@@ -955,6 +958,96 @@ function openConviteForm(){
   });
 }
 
+/* -------------------------- Administração: atividades -------------------------- */
+const AT_PAGE = 100;
+const ACAO_LABEL = {acessou:'Acessou', criou:'Cadastrou', editou:'Editou', excluiu:'Excluiu', restaurou:'Restaurou'};
+const ACAO_TONE  = {acessou:'neutral', criou:'ok', editou:'warn', excluiu:'crit', restaurou:'ok'};
+const atFiltro = {acao:'', tabela:'', usuario:''};
+let atRows = [];
+let atSeq = 0;
+
+function atividadeDetalhe(r){
+  const d = r.detalhes;
+  if(!d) return '';
+  const mod = MODULES[r.tabela];
+  const rotulo = k => { const f = mod && mod.fields.find(x=>x.key===k); return f ? f.label : k; };
+  const valor = v => (v==null || v==='') ? '(vazio)' : String(v);
+  if(r.acao==='editou'){
+    return Object.keys(d).map(k=> rotulo(k)+': '+valor(d[k] && d[k].de)+' → '+valor(d[k] && d[k].para)).join(' · ');
+  }
+  if(r.acao==='acessou') return 'Perfil: '+(ROLE_LABEL[d.perfil]||d.perfil||'—');
+  if(d.unidade) return 'Unidade: '+unitLabel(d.unidade);
+  return '';
+}
+
+function renderAtividades(){
+  if(!isAdmin()) return;
+  const content = document.getElementById('content');
+  content.innerHTML = '<div class="lixeira-bar">'+
+    '<select id="atAcao" class="field-select"><option value="">Todas as ações</option>'+
+      Object.keys(ACAO_LABEL).map(k=> '<option value="'+k+'" '+(atFiltro.acao===k?'selected':'')+'>'+ACAO_LABEL[k]+'</option>').join('')+'</select>'+
+    '<select id="atTabela" class="field-select"><option value="">Todos os módulos</option>'+
+      MODULE_ORDER.map(k=> '<option value="'+k+'" '+(atFiltro.tabela===k?'selected':'')+'>'+esc(MODULES[k].label)+'</option>').join('')+'</select>'+
+    '<input id="atUsuario" type="text" class="field-select" placeholder="Filtrar por e-mail…" value="'+esc(atFiltro.usuario)+'"/>'+
+    '</div><div id="atTable"></div>';
+  document.getElementById('atAcao').addEventListener('change', e=>{ atFiltro.acao = e.target.value; carregarAtividades(true); });
+  document.getElementById('atTabela').addEventListener('change', e=>{ atFiltro.tabela = e.target.value; carregarAtividades(true); });
+  let t = null;
+  document.getElementById('atUsuario').addEventListener('input', e=>{
+    atFiltro.usuario = e.target.value.trim();
+    clearTimeout(t);
+    t = setTimeout(()=> carregarAtividades(true), 350);
+  });
+  carregarAtividades(true);
+}
+
+async function carregarAtividades(reset){
+  const box = document.getElementById('atTable');
+  if(!box) return;
+  const seq = ++atSeq;
+  if(reset){ atRows = []; box.innerHTML = '<div class="table-wrap"><div class="table-empty">Carregando…</div></div>'; }
+  const from = atRows.length;
+  let q = supabaseClient.from('auditoria').select('*').order('em', {ascending:false}).range(from, from + AT_PAGE - 1);
+  if(atFiltro.acao) q = q.eq('acao', atFiltro.acao);
+  if(atFiltro.tabela) q = q.eq('tabela', atFiltro.tabela);
+  if(atFiltro.usuario) q = q.ilike('usuario_email', '%'+atFiltro.usuario+'%');
+  const { data, error } = await q;
+  // descarta resposta antiga (filtro mudou no meio) ou de outra tela
+  if(seq !== atSeq || state.moduleKey!=='atividades' || !document.getElementById('atTable')) return;
+  if(error){
+    box.innerHTML = '<div class="table-wrap"><div class="table-empty"><b>Não foi possível carregar o registro</b>'+esc(error.message)+
+      (/auditoria/i.test(error.message)?'<br>Rode o schema.sql atualizado no Supabase.':'')+'</div></div>';
+    return;
+  }
+  const page = data || [];
+  atRows = atRows.concat(page);
+
+  let html = '<div class="table-wrap">';
+  if(atRows.length===0){
+    html += '<div class="table-empty"><span class="icon">'+ic('historico')+'</span><b>Nenhuma atividade encontrada</b>'+
+      ((atFiltro.acao||atFiltro.tabela||atFiltro.usuario)?'Ajuste os filtros.':'As ações feitas a partir de agora aparecem aqui.')+'</div>';
+  } else {
+    html += '<div class="result-count">'+atRows.length+' registro'+(atRows.length===1?'':'s')+' exibido'+(atRows.length===1?'':'s')+', do mais recente para o mais antigo</div>'+
+      '<div class="table-scroll"><table><thead><tr><th>Quando</th><th>Quem</th><th>Ação</th><th>Módulo</th><th>Item</th><th>Detalhes</th></tr></thead><tbody>';
+    atRows.forEach(r=>{
+      const mod = MODULES[r.tabela];
+      const det = atividadeDetalhe(r);
+      html += '<tr><td class="cell-mono" style="white-space:nowrap;">'+esc(new Date(r.em).toLocaleString('pt-BR'))+'</td>'+
+        '<td>'+esc(r.usuario_email||'—')+'</td>'+
+        '<td><span class="badge '+(ACAO_TONE[r.acao]||'neutral')+'">'+esc(ACAO_LABEL[r.acao]||r.acao)+'</span></td>'+
+        '<td>'+esc(mod?mod.label:(r.tabela||'—'))+'</td>'+
+        '<td>'+esc(r.rotulo||'—')+'</td>'+
+        '<td class="at-detail" title="'+esc(det)+'">'+esc(det)+'</td></tr>';
+    });
+    html += '</tbody></table></div>';
+    if(page.length===AT_PAGE) html += '<div style="padding:12px 14px;"><button class="btn" id="atMais">Carregar mais</button></div>';
+  }
+  html += '</div>';
+  box.innerHTML = html;
+  const more = document.getElementById('atMais');
+  if(more) more.addEventListener('click', ()=>{ more.disabled = true; carregarAtividades(false); });
+}
+
 /* -------------------------- Administração: lixeira -------------------------- */
 let lixeiraFiltro = '';
 function lixeiraItemLabel(r){
@@ -1080,6 +1173,8 @@ async function startApp(user){
   renderSidebar();
   renderTopbar();
   renderDashboard();
+  // Registra o acesso sem esperar resposta (não atrasa a tela; se falhar, ignora).
+  supabaseClient.rpc('registrar_acesso').then(()=>{}, ()=>{});
 }
 
 function resetSession(){
