@@ -278,17 +278,24 @@ end $$;
 -- Authentication do Supabase (que em algumas versões do painel liga cadastro
 -- e login na mesma chave) — nenhuma conta com outro domínio consegue ser
 -- criada, seja por autocadastro ou por convite feito por engano.
--- Se algum dia a equipe usar outro domínio de e-mail, ajuste a expressão
--- abaixo (troque "grupowish\.com" pelo domínio correto).
+-- Pessoas de fora do domínio (ex: prestadores de serviço) só entram se o e-mail
+-- completo estiver na lista "externos_permitidos" abaixo. Para liberar mais
+-- alguém, acrescente o e-mail na lista e rode este trecho de novo.
 -- ---------------------------------------------------------------------------
 create or replace function public.restrict_signup_domain()
 returns trigger
 language plpgsql
 security definer
 as $$
+declare
+  externos_permitidos text[] := array[
+    'adriano.candido@alliedit.com.br'
+  ];
 begin
-  if new.email is null or new.email !~* '@grupowish\.com$' then
-    raise exception 'Cadastro permitido apenas para e-mails @grupowish.com';
+  if new.email is null
+     or (new.email !~* '@grupowish\.com$'
+         and lower(new.email) <> all (externos_permitidos)) then
+    raise exception 'Cadastro permitido apenas para e-mails @grupowish.com ou externos autorizados';
   end if;
   return new;
 end;
