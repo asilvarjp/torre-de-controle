@@ -27,8 +27,25 @@ Deno.serve(async (req) => {
   try {
     const url = Deno.env.get('SUPABASE_URL')!;
 
+    // Chave pública: a mesma que o navegador já mandou no cabeçalho "apikey".
+    const chavePublica = req.headers.get('apikey') ?? Deno.env.get('SUPABASE_ANON_KEY') ?? '';
+
+    // Chave administrativa: o Supabase injeta uma destas (dependendo de o projeto
+    // usar as chaves antigas ou as novas "sb_secret"). Se nenhuma existir, crie o
+    // segredo "CHAVE_ADMIN" em Edge Functions → Secrets.
+    let chaveAdmin = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? Deno.env.get('CHAVE_ADMIN') ?? '';
+    if (!chaveAdmin) {
+      try {
+        const segredos = JSON.parse(Deno.env.get('SUPABASE_SECRET_KEYS') ?? '{}');
+        chaveAdmin = String(Object.values(segredos)[0] ?? '');
+      } catch (_) { /* segue sem chave */ }
+    }
+    if (!chaveAdmin) {
+      return json({ erro: 'Chave administrativa não encontrada. Crie o segredo CHAVE_ADMIN em Edge Functions → Secrets.' }, 500);
+    }
+
     // 1) Quem está chamando precisa ser administrador.
-    const quem = createClient(url, Deno.env.get('SUPABASE_ANON_KEY')!, {
+    const quem = createClient(url, chavePublica, {
       global: { headers: { Authorization: req.headers.get('Authorization') ?? '' } },
     });
     const { data: papelDeQuemChama, error: erroPapel } = await quem.rpc('meu_papel');
@@ -51,7 +68,7 @@ Deno.serve(async (req) => {
     }
 
     // 3) Com a chave administrativa: autoriza o e-mail e envia o convite.
-    const admin = createClient(url, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+    const admin = createClient(url, chaveAdmin);
 
     const { error: erroAut } = await admin.from('usuarios_autorizados').upsert({
       email,
