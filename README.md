@@ -155,6 +155,23 @@ navegador):
 - Para recuperar o acesso de administrador pelo SQL Editor do Supabase:
   `update public.perfis set papel = 'admin' where email = 'seu@email';`
 
+### Botão "Adicionar usuário" (publicar a função uma única vez)
+
+Convidar alguém exige uma credencial administrativa do Supabase, que não pode
+ficar no código do site. Por isso o botão chama uma função que roda no servidor
+do Supabase ([`supabase/functions/convidar-usuario/index.ts`](supabase/functions/convidar-usuario/index.ts)),
+que só aceita pedidos de administradores.
+
+1. No painel do Supabase, abra **Edge Functions → Deploy a new function → Via Editor**.
+2. Nome da função: `convidar-usuario` (exatamente assim).
+3. Apague o código de exemplo, cole o conteúdo do arquivo acima e clique em **Deploy**.
+4. Se houver a opção **Verify JWT**, desative: a função já confere sozinha se
+   quem chamou é administrador.
+
+Depois, em **Administração → Usuários → Adicionar usuário**, informe o e-mail e
+o perfil. E-mails de fora do domínio `@grupowish.com` (prestadores) também
+funcionam por esse botão.
+
 ## Segurança — leia antes de usar em produção
 
 - As senhas do TeamViewer ficam **ocultas na tela por padrão**, mas são

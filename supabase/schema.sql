@@ -258,6 +258,18 @@ create policy "perfis_editar" on public.perfis
   using (public.meu_papel() = 'admin')
   with check (public.meu_papel() = 'admin');
 
+-- E-mails convidados pelo botão "Adicionar usuário" do sistema (função
+-- convidar-usuario). Serve para duas coisas: liberar e-mails de fora do domínio
+-- (prestadores) e já definir o perfil da pessoa. Sem políticas de propósito:
+-- só funções do servidor mexem aqui.
+create table if not exists public.usuarios_autorizados (
+  email text primary key,
+  papel text not null default 'leitor' check (papel in ('admin','editor','leitor')),
+  convidado_por text,
+  created_at timestamptz not null default now()
+);
+alter table public.usuarios_autorizados enable row level security;
+
 create or replace function public.criar_perfil_novo_usuario()
 returns trigger
 language plpgsql
@@ -266,7 +278,14 @@ set search_path = public
 as $$
 begin
   insert into public.perfis (id, email, papel)
-  values (new.id, new.email, 'leitor')
+  values (
+    new.id,
+    new.email,
+    coalesce(
+      (select papel from public.usuarios_autorizados where lower(email) = lower(new.email)),
+      'leitor'
+    )
+  )
   on conflict (id) do nothing;
   return new;
 end;
@@ -444,23 +463,22 @@ end $$;
 -- e login na mesma chave) — nenhuma conta com outro domínio consegue ser
 -- criada, seja por autocadastro ou por convite feito por engano.
 -- Pessoas de fora do domínio (ex: prestadores de serviço) só entram se o e-mail
--- completo estiver na lista "externos_permitidos" abaixo. Para liberar mais
--- alguém, acrescente o e-mail na lista e rode este trecho de novo.
+-- estiver em public.usuarios_autorizados — o que acontece quando um
+-- administrador usa o botão "Adicionar usuário" no sistema.
 -- ---------------------------------------------------------------------------
 create or replace function public.restrict_signup_domain()
 returns trigger
 language plpgsql
 security definer
+set search_path = public
 as $$
-declare
-  externos_permitidos text[] := array[
-    'adriano.candido@alliedit.com.br'
-  ];
 begin
   if new.email is null
      or (new.email !~* '@grupowish\.com$'
-         and lower(new.email) <> all (externos_permitidos)) then
-    raise exception 'Cadastro permitido apenas para e-mails @grupowish.com ou externos autorizados';
+         and not exists (
+           select 1 from public.usuarios_autorizados where lower(email) = lower(new.email)
+         )) then
+    raise exception 'Cadastro permitido apenas para e-mails @grupowish.com ou convidados por um administrador';
   end if;
   return new;
 end;

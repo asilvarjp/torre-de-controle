@@ -460,6 +460,11 @@ function renderTopbar(){
   document.getElementById('topbarSub').textContent = head?head.sub:'Visão consolidada de todas as unidades Wish Hotels & Resorts';
 
   const ctrls = document.getElementById('topbarControls');
+  if(state.moduleKey==='usuarios'){
+    ctrls.innerHTML = '<button class="btn btn-primary" id="btnAddUser"><span class="icon">'+ic('plus')+'</span>Adicionar usuário</button>';
+    document.getElementById('btnAddUser').addEventListener('click', openConviteForm);
+    return;
+  }
   if(!mod){ ctrls.innerHTML=''; return; }
 
   let html = '';
@@ -872,16 +877,24 @@ async function renderUsuarios(){
       '<div><span class="badge warn">Editor</span><p>Consulta, cadastra e edita. Não consegue excluir.</p></div>'+
       '<div><span class="badge neutral">Leitor</span><p>Somente consulta.</p></div>'+
     '</div></div>';
-  html += '<div class="table-wrap"><div class="table-scroll"><table><thead><tr><th>E-mail</th><th>Perfil</th><th>Desde</th></tr></thead><tbody>';
+  html += '<div class="table-wrap"><div class="table-scroll"><table><thead><tr><th>E-mail</th><th>Perfil</th><th>Desde</th><th></th></tr></thead><tbody>';
   (data||[]).forEach(p=>{
     const self = currentUser && p.id===currentUser.id;
     html += '<tr><td>'+esc(p.email||'—')+(self?' <span class="badge neutral">você</span>':'')+'</td><td>'+
       '<select class="role-sel field-select" data-id="'+p.id+'" '+(self?'disabled title="Você não pode alterar o próprio perfil"':'')+'>'+
       ['admin','editor','leitor'].map(r=>'<option value="'+r+'" '+(p.papel===r?'selected':'')+'>'+ROLE_LABEL[r]+'</option>').join('')+
-      '</select></td><td class="cell-mono">'+fmtDate(p.created_at)+'</td></tr>';
+      '</select></td><td class="cell-mono">'+fmtDate(p.created_at)+'</td>'+
+      '<td><div class="cell-actions">'+(self?'':'<button class="btn btn-sm reset-btn" data-email="'+esc(p.email||'')+'" title="Envia um e-mail para a pessoa criar uma nova senha">Enviar link de senha</button>')+'</div></td></tr>';
   });
   html += '</tbody></table></div></div>';
   content.innerHTML = html;
+  content.querySelectorAll('.reset-btn').forEach(btn=> btn.addEventListener('click', async ()=>{
+    btn.disabled = true;
+    const { error: err } = await supabaseClient.auth.resetPasswordForEmail(btn.dataset.email, { redirectTo: window.location.href.split('#')[0] });
+    btn.disabled = false;
+    if(err){ toast('Não foi possível enviar: '+err.message, true); return; }
+    toast('Link de senha enviado para '+btn.dataset.email+'.');
+  }));
   content.querySelectorAll('.role-sel').forEach(sel=> sel.addEventListener('change', async ()=>{
     const { data: upd, error: err } = await supabaseClient.from('perfis').update({papel: sel.value}).eq('id', sel.dataset.id).select('id');
     if(err || !upd || !upd.length){
@@ -891,6 +904,55 @@ async function renderUsuarios(){
     }
     toast('Perfil atualizado.');
   }));
+}
+
+function openConviteForm(){
+  if(!isAdmin()) return;
+  const root = document.getElementById('modalRoot');
+  root.innerHTML = '<div class="modal-overlay" id="conviteOverlay"><div class="modal small">'+
+    '<div class="modal-head"><h2>Adicionar usuário</h2><button class="icon-btn" id="conviteClose"><span class="icon">'+ic('close')+'</span></button></div>'+
+    '<div class="modal-body"><div class="form-grid" style="grid-template-columns:1fr;">'+
+      '<div class="form-field"><label for="conviteEmail">E-mail *</label><input type="email" id="conviteEmail" placeholder="nome@empresa.com" autocomplete="off"/></div>'+
+      '<div class="form-field"><label for="convitePapel">Perfil</label><select id="convitePapel">'+
+        ['leitor','editor','admin'].map(r=>'<option value="'+r+'">'+ROLE_LABEL[r]+'</option>').join('')+
+      '</select></div>'+
+      '<p class="perm-hint">A pessoa recebe um e-mail com um link para criar a própria senha. Leitor: só consulta · Editor: consulta, cadastra e edita · Administrador: tudo.</p>'+
+    '</div></div>'+
+    '<div class="modal-foot"><button class="btn" id="conviteCancel">Cancelar</button>'+
+    '<button class="btn btn-primary" id="conviteSend"><span class="icon">'+ic('check')+'</span>Enviar convite</button></div>'+
+    '</div></div>';
+  const close = ()=>{ root.innerHTML=''; };
+  document.getElementById('conviteClose').addEventListener('click', close);
+  document.getElementById('conviteCancel').addEventListener('click', close);
+  document.getElementById('conviteOverlay').addEventListener('click', e=>{ if(e.target.id==='conviteOverlay') close(); });
+  document.getElementById('conviteEmail').focus();
+
+  document.getElementById('conviteSend').addEventListener('click', async ()=>{
+    const email = document.getElementById('conviteEmail').value.trim();
+    const papel = document.getElementById('convitePapel').value;
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ toast('Digite um e-mail válido.', true); return; }
+    const btn = document.getElementById('conviteSend');
+    btn.disabled = true;
+    const { error } = await supabaseClient.functions.invoke('convidar-usuario', {
+      body: { email, papel, redirectTo: window.location.href.split('#')[0] },
+    });
+    if(error){
+      let msg = error.message;
+      const status = error.context && error.context.status;
+      const naoPublicada = 'a função "convidar-usuario" ainda não foi publicada no Supabase (veja o README).';
+      if(status===404 || error.name==='FunctionsFetchError'){
+        msg = naoPublicada;
+      } else if(error.context && typeof error.context.json==='function'){
+        try{ const j = await error.context.json(); if(j && j.erro) msg = j.erro; }catch(_){}
+      }
+      toast('Não foi possível adicionar: '+msg, true);
+      btn.disabled = false;
+      return;
+    }
+    close();
+    toast('Convite enviado para '+email+'.');
+    if(state.moduleKey==='usuarios') renderUsuarios();
+  });
 }
 
 /* -------------------------- Administração: lixeira -------------------------- */
