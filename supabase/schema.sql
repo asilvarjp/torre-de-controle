@@ -221,6 +221,60 @@ alter table public.depreciacao add column if not exists recomendar_substituicao 
 alter table public.depreciacao add column if not exists prioridade text;
 
 -- ---------------------------------------------------------------------------
+-- IMPRESSORAS — contrato de outsourcing de impressão
+-- O cadastro do equipamento fica em public.impressoras (dados que não mudam
+-- todo mês). O que muda a cada mês (locação, páginas) fica em
+-- public.impressoras_mensal, uma linha por equipamento por competência, e os
+-- totais cobrados no descritivo do fornecedor ficam em
+-- public.impressoras_competencias. Importar uma nova competência NÃO mexe nas
+-- anteriores. Nada é calculado ou estimado aqui: só os valores informados.
+-- ---------------------------------------------------------------------------
+alter table public.impressoras add column if not exists patrimonio text;
+alter table public.impressoras add column if not exists cnpj text;
+alter table public.impressoras add column if not exists endereco text;
+alter table public.impressoras add column if not exists observacao text;
+alter table public.impressoras add column if not exists tipo_equipamento text;
+alter table public.impressoras add column if not exists contrato text;
+alter table public.impressoras add column if not exists chave_origem text;
+create unique index if not exists impressoras_chave_origem_uq
+  on public.impressoras (chave_origem) where chave_origem is not null;
+create index if not exists impressoras_contrato_idx on public.impressoras (contrato);
+
+create table if not exists public.impressoras_competencias (
+  id uuid primary key default gen_random_uuid(),
+  competencia date not null unique check (extract(day from competencia) = 1),
+  total_pb integer,
+  total_color integer,
+  excedente_pb numeric,      -- R$ de excedente PB cobrado na competência
+  excedente_color numeric,   -- R$ de excedente colorido cobrado na competência
+  franquia_pb integer,       -- vazio = não informado pelo fornecedor (pendência)
+  franquia_color integer,    -- vazio = não informado pelo fornecedor (pendência)
+  desconto numeric,          -- vazio = não informado (pendência)
+  arquivo_origem text,
+  observacao text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.impressoras_mensal (
+  id uuid primary key default gen_random_uuid(),
+  competencia date not null references public.impressoras_competencias (competencia)
+    on delete restrict on update cascade,
+  impressora_id uuid not null references public.impressoras (id) on delete restrict,
+  unidade text,              -- hotel onde o equipamento estava NESTA competência
+  valor_locacao numeric,     -- vazio = não informado (pendência)
+  paginas_pb integer,
+  paginas_color integer,
+  observacao text,
+  linha_origem integer,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (competencia, impressora_id)
+);
+create index if not exists impressoras_mensal_competencia_idx on public.impressoras_mensal (competencia);
+create index if not exists impressoras_mensal_impressora_idx on public.impressoras_mensal (impressora_id);
+
+-- ---------------------------------------------------------------------------
 -- PERFIS DE ACESSO
 --   admin  — tudo: cadastra, edita, exclui, restaura da lixeira e gerencia usuários
 --   editor — consulta, cadastra e edita; NÃO exclui
@@ -362,7 +416,8 @@ begin
 
   if r.tabela <> all (array[
     'inventario','estoque','locados','compras','licencas',
-    'transporte','impressoras','teamviewer','depreciacao','linhas'
+    'transporte','impressoras','teamviewer','depreciacao','linhas',
+    'impressoras_competencias','impressoras_mensal'
   ]) then
     raise exception 'Tabela inválida: %', r.tabela;
   end if;
@@ -470,7 +525,8 @@ begin
     coalesce(
       v_row ->> 'hostname', v_row ->> 'patrimonio', v_row ->> 'descricao_item',
       v_row ->> 'equipamento', v_row ->> 'identificador', v_row ->> 'numero',
-      v_row ->> 'impressora', v_row ->> 'licenca', v_row ->> 'descricao_envio'
+      v_row ->> 'impressora', v_row ->> 'licenca', v_row ->> 'descricao_envio',
+      v_row ->> 'serie', v_row ->> 'competencia'
     ),
     v_det
   );
@@ -543,7 +599,8 @@ begin
   for t in
     select unnest(array[
       'inventario','estoque','locados','compras','licencas',
-      'transporte','impressoras','teamviewer','depreciacao','linhas'
+      'transporte','impressoras','teamviewer','depreciacao','linhas',
+      'impressoras_competencias','impressoras_mensal'
     ])
   loop
     execute format('drop trigger if exists trg_set_updated_at on public.%I', t);

@@ -136,6 +136,25 @@ serve.ps1              servidor local só para testes (não é usado no GitHub P
 | Depreciação | Vida útil, valor residual e recomendação de substituição de ativos |
 | Linhas Wish | Linhas telefônicas corporativas — Corporativo/Hotéis e Exclusive Guest |
 
+## Impressoras — contrato de outsourcing
+
+O módulo tem cinco visões sobre o descritivo mensal do fornecedor (Dashboard
+executivo, Por hotel, Inventário, Histórico mensal e Pendências) mais o
+"Cadastro geral" do parque antigo.
+
+- **Nada é estimado.** Só aparecem valores informados no descritivo; o que falta
+  (franquia, tarifa por página, desconto) vira pendência.
+- O descritivo traz **um valor de excedente PB e um colorido (R$)**, rateado
+  pela participação em páginas. O sistema recalcula esse rateio por linha
+  (fórmulas na tela, em "Como é calculado") e confere com o total cobrado.
+- **Atualização mensal:** botão **Importar competência** (planilha `.xlsx`, aba
+  `WISH`). O sistema mostra uma prévia com as validações (duplicidades, campos
+  ausentes, fórmulas com referência errada, divergência com a aba `Plan3`,
+  conferência de totais) e só grava depois da confirmação. Cada mês fica
+  guardado; importar um novo mês não altera os anteriores.
+- Equipamentos já cadastrados não têm dados sobrescritos na importação (só
+  campos vazios são completados).
+
 ## Perfis de acesso e Lixeira
 
 Cada pessoa tem um perfil, aplicado no próprio banco (não dá para burlar pelo

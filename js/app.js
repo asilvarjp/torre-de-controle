@@ -16,6 +16,7 @@ const UNITS = [
   {code:'PSDU', label:'Wish Santos Dumont'},
   {code:'LGALEAO', label:'Wish Linx Galeão'},
   {code:'LCONFINS', label:'Wish Confins'},
+  {code:'MAKAIRA', label:'Makaira Beach Resort'},
 ];
 const unitLabel = (code) => (UNITS.find(u=>u.code===code)||{}).label || code || '—';
 
@@ -179,18 +180,24 @@ const MODULES = {
   },
   impressoras:{
     label:'Impressoras', icon:'impressoras', collection:'impressoras',
-    title:'Impressoras e serviços', sub:'Impressoras por unidade — série, IP e contadores A4',
+    title:'Impressoras e serviços', sub:'Parque, custos de locação e consumo de impressão por hotel',
     unitField:'unidade', statusField:'status',
-    searchFields:['impressora','serie','ip'],
-    columns:['impressora','unidade','serie','ip','contador_mono','contador_color','status'],
+    searchFields:['impressora','serie','patrimonio','ip'],
+    columns:['impressora','unidade','patrimonio','serie','contrato','ip','status'],
     fields:[
       {key:'unidade', label:'Unidade', type:'unidade', required:true},
       {key:'impressora', label:'Modelo da impressora', type:'text', required:true},
+      {key:'patrimonio', label:'Patrimônio', type:'text', mono:true},
       {key:'serie', label:'Série', type:'text', mono:true},
+      {key:'tipo_equipamento', label:'Tipo de equipamento', type:'select', options:['Impressora','Fragmentadora','Outro']},
+      {key:'contrato', label:'Contrato', type:'text'},
+      {key:'cnpj', label:'CNPJ', type:'text', mono:true},
+      {key:'endereco', label:'Endereço', type:'text', full:true},
       {key:'ip', label:'Endereço IP', type:'text', mono:true},
       {key:'contador_mono', label:'Contador A4 mono', type:'number'},
       {key:'contador_color', label:'Contador A4 color', type:'number'},
       {key:'status', label:'Status', type:'select', options:['Ativa','Manutenção','Inativa'], badge:true},
+      {key:'observacao', label:'Observação (ex.: BACKUP)', type:'text', full:true},
     ],
   },
   teamviewer:{
@@ -323,6 +330,7 @@ async function loadMyRole(uid){
 
 // Traduz os erros de permissão do banco para uma frase clara.
 function friendlyError(e, acao){
+  if(e && e.code==='23503') return 'este item tem histórico vinculado (por exemplo, meses já importados) e não pode ser removido.';
   if(e && (e.code==='42501' || /row-level security/i.test(e.message||'')))
     return 'Seu perfil ('+ROLE_LABEL[currentRole]+') não tem permissão para '+acao+'.';
   return (e && e.message) ? e.message : 'erro desconhecido';
@@ -426,6 +434,7 @@ function switchModule(key){
   else if(key === 'usuarios'){ renderUsuarios(); }
   else if(key === 'atividades'){ renderAtividades(); }
   else if(key === 'lixeira'){ renderLixeira(); }
+  else if(key === 'impressoras' && typeof impOpen === 'function'){ impOpen(); }
   else { subscribeModule(key); }
 }
 
@@ -469,6 +478,8 @@ function renderTopbar(){
     return;
   }
   if(!mod){ ctrls.innerHTML=''; return; }
+  // Impressoras: as abas de análise têm seus próprios filtros dentro da tela.
+  if(mod.collection==='impressoras' && typeof impTopbarHidden==='function' && impTopbarHidden()){ ctrls.innerHTML=''; return; }
 
   let html = '';
   if(mod.unitField){
@@ -634,6 +645,7 @@ function renderModuleTable(key){
   let html = '';
   if(mod.collection==='depreciacao') html = renderInvestmentPanel();
   else if(mod.collection==='compras') html = renderComprasSummaryPanel();
+  else if(mod.collection==='impressoras' && typeof impTabsHtml==='function') html = impTabsHtml();
   html += '<div class="table-wrap">';
   if(rows.length === 0){
     html += '<div class="table-empty"><span class="icon">'+ic(mod.icon)+'</span><b>Nenhum registro encontrado</b>'+
@@ -655,6 +667,7 @@ function renderModuleTable(key){
   }
   html += '</div>';
   content.innerHTML = html;
+  if(mod.collection==='impressoras' && typeof impWireTabs==='function') impWireTabs();
 
   content.querySelectorAll('.edit-btn').forEach(b=> b.addEventListener('click', ()=>{
     const row = state.rows.find(r=>r.id===b.dataset.id);
@@ -757,6 +770,7 @@ function openForm(key, existing){
       if(existing){ await Store.update(mod.collection, existing.id, data); toast('Registro atualizado.'); }
       else { await Store.add(mod.collection, data); toast('Registro criado.'); }
       close();
+      if(mod.collection==='impressoras' && typeof impAfterSave==='function') impAfterSave();
     }catch(e){
       console.error(e);
       toast('Não foi possível salvar o registro: '+friendlyError(e,'cadastrar ou editar registros'), true);
@@ -816,6 +830,8 @@ function renderDashboard(){
     '</div>';
 
   loadDashboard().then(data=>{
+    // se a pessoa já trocou de tela enquanto carregava, não desenha por cima
+    if(state.moduleKey !== 'dashboard' || !document.getElementById('kpiGrid')) return;
     const inv = data.inventario || [];
     const locados = data.locados || [];
     const licencas = data.licencas || [];
