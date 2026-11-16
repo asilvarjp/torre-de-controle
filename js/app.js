@@ -391,6 +391,8 @@ const state = {
   revealed:{},
   onlyRecommend:false,
   itemFilter:'',
+  deptoFilter:'',
+  usuarioFilter:'',
 };
 const moduleCounts = {};
 
@@ -427,6 +429,8 @@ function switchModule(key){
   state.moduleKey = key;
   state.search = '';
   state.itemFilter = '';
+  state.deptoFilter = '';
+  state.usuarioFilter = '';
   if(typeof state.unsub === 'function'){ state.unsub(); state.unsub = null; }
   renderSidebar();
   renderTopbar();
@@ -445,6 +449,7 @@ function subscribeModule(key){
     state.rows = rows;
     moduleCounts[key] = rows.length;
     if(mod.collection==='compras') refreshItemFilterSelect();
+    if(mod.collection==='linhas') refreshLinhasFilters();
     renderModuleTable(key);
     updateNavCounts();
   });
@@ -494,6 +499,10 @@ function renderTopbar(){
   if(mod.collection==='compras'){
     html += '<select id="itemFilterSel" class="field-select"><option value="">Todos os itens</option>'+itemFilterOptionsHtml()+'</select>';
   }
+  if(mod.collection==='linhas'){
+    html += '<select id="deptoFilterSel" class="field-select" title="Filtrar por departamento"></select>'+
+            '<select id="usuarioFilterSel" class="field-select" title="Filtrar por usuário"></select>';
+  }
   html += '<div class="search-box"><span class="icon">'+ic('search')+'</span><input id="searchInput" type="text" placeholder="Buscar…" value="'+esc(state.search)+'"/></div>';
   if(canWrite()){
     html += '<button class="btn btn-primary" id="btnNew"><span class="icon">'+ic('plus')+'</span>Novo</button>';
@@ -501,7 +510,12 @@ function renderTopbar(){
   ctrls.innerHTML = html;
 
   const selEl = document.getElementById('unidadeFilterSel');
-  if(selEl) selEl.addEventListener('change', e=>{ state.unidadeFilter = e.target.value; renderModuleTable(state.moduleKey); });
+  if(selEl) selEl.addEventListener('change', e=>{ state.unidadeFilter = e.target.value; if(mod.collection==='linhas') refreshLinhasFilters(); renderModuleTable(state.moduleKey); });
+  const deptoEl = document.getElementById('deptoFilterSel');
+  if(deptoEl) deptoEl.addEventListener('change', e=>{ state.deptoFilter = e.target.value; refreshLinhasFilters(); renderModuleTable(state.moduleKey); });
+  const usuEl = document.getElementById('usuarioFilterSel');
+  if(usuEl) usuEl.addEventListener('change', e=>{ state.usuarioFilter = e.target.value; renderModuleTable(state.moduleKey); });
+  if(mod.collection==='linhas') refreshLinhasFilters();
   const onlyRecEl = document.getElementById('onlyRecommendChk');
   if(onlyRecEl) onlyRecEl.addEventListener('change', e=>{ state.onlyRecommend = e.target.checked; renderModuleTable(state.moduleKey); });
   const itemEl = document.getElementById('itemFilterSel');
@@ -522,6 +536,42 @@ function refreshItemFilterSelect(){
   sel.innerHTML = '<option value="">Todos os itens</option>'+itemFilterOptionsHtml();
 }
 
+// Filtros de departamento e usuário do módulo Linhas Wish. As opções acompanham
+// os outros filtros: os departamentos são os da unidade escolhida e os usuários
+// são os do departamento escolhido. Comparação sem diferenciar maiúsculas.
+const LINHAS_VAZIO = '__vazio__';
+function linhasMatch(val, filtro){
+  const v = (val||'').trim().toLowerCase();
+  return filtro === LINHAS_VAZIO ? v === '' : v === filtro;
+}
+function linhasOpcoes(field, rows, selecionado, rotuloTodos, rotuloVazio){
+  const m = new Map(); let vazios = 0;
+  rows.forEach(r=>{
+    const v = (r[field]||'').trim();
+    if(!v){ vazios++; return; }
+    const k = v.toLowerCase();
+    if(!m.has(k)) m.set(k, v);
+  });
+  const lista = Array.from(m, ([k,v])=>({k,v})).sort((a,b)=> a.v.localeCompare(b.v,'pt-BR'));
+  let html = '<option value="">'+rotuloTodos+'</option>';
+  if(vazios) html += '<option value="'+LINHAS_VAZIO+'" '+(selecionado===LINHAS_VAZIO?'selected':'')+'>'+rotuloVazio+' ('+vazios+')</option>';
+  html += lista.map(o=> '<option value="'+esc(o.k)+'" '+(selecionado===o.k?'selected':'')+'>'+esc(o.v)+'</option>').join('');
+  const valido = selecionado==='' || (selecionado===LINHAS_VAZIO && vazios>0) || m.has(selecionado);
+  return {html, valido};
+}
+function refreshLinhasFilters(){
+  const dSel = document.getElementById('deptoFilterSel'), uSel = document.getElementById('usuarioFilterSel');
+  if(!dSel || !uSel) return;
+  const naUnidade = state.rows.filter(r=> !state.unidadeFilter || r.unidade===state.unidadeFilter);
+  let d = linhasOpcoes('depto', naUnidade, state.deptoFilter, 'Todos os departamentos', '(sem departamento)');
+  if(!d.valido){ state.deptoFilter = ''; d = linhasOpcoes('depto', naUnidade, '', 'Todos os departamentos', '(sem departamento)'); }
+  dSel.innerHTML = d.html;
+  const noDepto = state.deptoFilter ? naUnidade.filter(r=> linhasMatch(r.depto, state.deptoFilter)) : naUnidade;
+  let u = linhasOpcoes('usuario', noDepto, state.usuarioFilter, 'Todos os usuários', '(sem usuário)');
+  if(!u.valido){ state.usuarioFilter = ''; u = linhasOpcoes('usuario', noDepto, '', 'Todos os usuários', '(sem usuário)'); }
+  uSel.innerHTML = u.html;
+}
+
 /* -------------------------- Tabela de módulo -------------------------- */
 function filteredRows(mod){
   let rows = state.rows.slice();
@@ -533,6 +583,10 @@ function filteredRows(mod){
   }
   if(mod.collection==='compras' && state.itemFilter){
     rows = rows.filter(r=> (r.descricao_item||'').trim()===state.itemFilter);
+  }
+  if(mod.collection==='linhas'){
+    if(state.deptoFilter) rows = rows.filter(r=> linhasMatch(r.depto, state.deptoFilter));
+    if(state.usuarioFilter) rows = rows.filter(r=> linhasMatch(r.usuario, state.usuarioFilter));
   }
   const q = state.search.trim().toLowerCase();
   if(q){
@@ -649,7 +703,7 @@ function renderModuleTable(key){
   html += '<div class="table-wrap">';
   if(rows.length === 0){
     html += '<div class="table-empty"><span class="icon">'+ic(mod.icon)+'</span><b>Nenhum registro encontrado</b>'+
-      (state.search||state.unidadeFilter||state.itemFilter ? 'Ajuste os filtros ou a busca.' : (canWrite() ? 'Clique em "Novo" para cadastrar o primeiro registro.' : 'Ainda não há registros neste módulo.'))+'</div>';
+      (state.search||state.unidadeFilter||state.itemFilter||state.deptoFilter||state.usuarioFilter ? 'Ajuste os filtros ou a busca.' : (canWrite() ? 'Clique em "Novo" para cadastrar o primeiro registro.' : 'Ainda não há registros neste módulo.'))+'</div>';
   } else {
     html += '<div class="result-count">'+rows.length+' registro'+(rows.length===1?'':'s')+'</div>';
     html += '<div class="table-scroll"><table><thead><tr>';
