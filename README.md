@@ -159,6 +159,20 @@ executivo, Por hotel, Inventário, Histórico mensal e Pendências) mais o
 - Equipamentos já cadastrados não têm dados sobrescritos na importação (só
   campos vazios são completados).
 
+## Nomenclatura dos hotéis
+
+O sistema grava o **código** do hotel e exibe o nome correto (lista `UNITS` em
+`js/app.js`): Marupiara by Wish, Hotel da Bahia by Wish, Prodigy Santos Dumont,
+Linx Galeão, Linx Confins, Wish Natal, Wish Serrano, Wish Foz do Iguaçu,
+Prodigy Gramado, Makaira Beach Resort e Matriz / Corporativo.
+
+Nomes antigos ou diferentes ("Prodigy Marupiara", "Wish Santos Dumont", "Wish
+Confins", "Wish Linx Galeão", "Wish Bahia"…) são corrigidos automaticamente:
+no banco por gatilho (`unidade_codigo()` no `schema.sql`, vale para tela,
+importação e SQL), na importação de impressoras e nos campos Origem/Destino do
+Transporte. Para um novo apelido, acrescente-o em `UNIT_ALIASES` (`app.js`) e na
+função `unidade_codigo` (`schema.sql`).
+
 ## Perfis de acesso e Lixeira
 
 Cada pessoa tem um perfil, aplicado no próprio banco (não dá para burlar pelo

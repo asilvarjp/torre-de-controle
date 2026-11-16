@@ -699,3 +699,159 @@ drop trigger if exists trg_restrict_signup_domain on auth.users;
 create trigger trg_restrict_signup_domain
 before insert on auth.users
 for each row execute function public.restrict_signup_domain();
+
+-- ---------------------------------------------------------------------------
+-- NOMENCLATURA DOS HOTÉIS
+-- O sistema guarda o CÓDIGO do hotel (MARUPIARA, PSDU, LCONFINS…) e o nome
+-- exibido fica no app (js/app.js, UNITS). Nomes corretos atuais:
+--   MARUPIARA = Marupiara by Wish        WBAHIA   = Hotel da Bahia by Wish
+--   PSDU      = Prodigy Santos Dumont    LGALEAO  = Linx Galeão
+--   LCONFINS  = Linx Confins
+-- Qualquer registro que entrar com um nome antigo/errado ("Prodigy Marupiara",
+-- "Wish Santos Dumont", "Wish Confins", "Wish Linx Galeão", "Wish Bahia"…) é
+-- convertido para o código correto automaticamente, por qualquer caminho de
+-- entrada (tela, importação ou SQL). Nomes que não forem reconhecidos ficam
+-- como estão. Manter em sincronia com UNIT_ALIASES / UNIT_KEYWORDS no js/app.js.
+-- ---------------------------------------------------------------------------
+create or replace function public.unidade_codigo(nome text, so_exato boolean default false)
+returns text
+language plpgsql
+immutable
+set search_path = public
+as $$
+declare
+  n text;
+begin
+  if nome is null then return null; end if;
+  n := lower(translate(nome, 'ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇáàâãäéèêëíìîïóòôõöúùûüç', 'AAAAAEEEEIIIIOOOOOUUUUCaaaaaeeeeiiiiooooouuuuc'));
+  n := btrim(regexp_replace(n, '[^a-z0-9]+', ' ', 'g'));
+  if n = '' then return null; end if;
+
+  -- nomes exatos (inclui os antigos e variações das planilhas)
+  if n in ('matriz','corporativo','matriz corporativo','mtz corp','mtz','grupo wish','grupo wish escritorio sp','escritorio sp','gjp matriz') then return 'MTZ-CORP'; end if;
+  if n in ('marupiara','marupiara resort','prodigy marupiara','marupiara by wish','gjp marupiara','gjp prodigy marupiara') then return 'MARUPIARA'; end if;
+  if n in ('wish natal','natal','wnatal','gjp wish natal') then return 'WNATAL'; end if;
+  if n in ('wish bahia','wish hotel da bahia','hotel da bahia','hotel da bahia by wish','bahia','wbahia','gjp wish bahia') then return 'WBAHIA'; end if;
+  if n in ('wish serrano','serrano','wserrano','gjp wish serrano') then return 'WSERRANO'; end if;
+  if n in ('wish foz','wish foz do iguacu','wish iguacu','foz do iguacu','foz','wfoz','gjp wish iguacu') then return 'WFOZ'; end if;
+  if n in ('prodigy gramado','gramado','pgramado','gjp prodigy gramado') then return 'PGRAMADO'; end if;
+  if n in ('prodigy santos dumont','wish santos dumont','santos dumont','psdu','psdumont','gjp santos dumont') then return 'PSDU'; end if;
+  if n in ('linx galeao','wish linx galeao','galeao','lgaleao','gjp linx galeao','gjp galeao') then return 'LGALEAO'; end if;
+  if n in ('linx confins','wish confins','confins','lconfins','gjp confins') then return 'LCONFINS'; end if;
+  if n in ('makaira','makaira beach resort') then return 'MAKAIRA'; end if;
+
+  if so_exato then return null; end if;
+
+  -- por trecho do nome (ex.: "Wish Hotel Confins - Térreo")
+  if n like '%confins%' then return 'LCONFINS'; end if;
+  if n like '%galeao%' then return 'LGALEAO'; end if;
+  if n like '%makaira%' then return 'MAKAIRA'; end if;
+  if n like '%marupiara%' then return 'MARUPIARA'; end if;
+  if n like '%santos dumont%' or n like '%psdumont%' then return 'PSDU'; end if;
+  if n like '%gramado%' then return 'PGRAMADO'; end if;
+  if n like '%iguacu%' or n ~ '(^| )foz( |$)' then return 'WFOZ'; end if;
+  if n like '%bahia%' then return 'WBAHIA'; end if;
+  if n like '%natal%' then return 'WNATAL'; end if;
+  if n like '%serrano%' then return 'WSERRANO'; end if;
+  if n like '%matriz%' or n like '%corporativo%' or n like '%escritorio sp%' or n like '%grupo wish%' then return 'MTZ-CORP'; end if;
+
+  return null; -- não reconhecido
+end;
+$$;
+
+-- nome de exibição correto de cada código
+create or replace function public.unidade_nome(codigo text)
+returns text
+language sql
+immutable
+as $$
+  select case codigo
+    when 'MTZ-CORP' then 'Matriz / Corporativo'
+    when 'MARUPIARA' then 'Marupiara by Wish'
+    when 'WNATAL' then 'Wish Natal'
+    when 'WBAHIA' then 'Hotel da Bahia by Wish'
+    when 'WSERRANO' then 'Wish Serrano'
+    when 'WFOZ' then 'Wish Foz do Iguaçu'
+    when 'PGRAMADO' then 'Prodigy Gramado'
+    when 'PSDU' then 'Prodigy Santos Dumont'
+    when 'LGALEAO' then 'Linx Galeão'
+    when 'LCONFINS' then 'Linx Confins'
+    when 'MAKAIRA' then 'Makaira Beach Resort'
+  end;
+$$;
+
+-- gatilho: corrige a coluna "unidade" antes de gravar
+create or replace function public.normalizar_unidade()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+declare
+  cod text;
+begin
+  if new.unidade is not null then
+    cod := public.unidade_codigo(new.unidade);
+    if cod is not null then new.unidade := cod; end if;
+  end if;
+  return new;
+end;
+$$;
+
+-- gatilho do Transporte: origem/destino são texto livre; só troca quando o
+-- texto é EXATAMENTE um nome de hotel conhecido (não mexe em frases como
+-- "Escritório SP - Almoxarifado").
+create or replace function public.normalizar_hotel_transporte()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+declare
+  cod text;
+begin
+  if new.origem is not null then
+    cod := public.unidade_codigo(new.origem, true);
+    if cod is not null then
+      new.origem := public.unidade_nome(cod);
+    end if;
+  end if;
+  if new.destino is not null then
+    cod := public.unidade_codigo(new.destino, true);
+    if cod is not null then
+      new.destino := public.unidade_nome(cod);
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+do $$
+declare
+  t text;
+begin
+  for t in
+    select unnest(array[
+      'inventario','locados','compras','licencas','transporte',
+      'impressoras','teamviewer','depreciacao','linhas','impressoras_mensal'
+    ])
+  loop
+    execute format('drop trigger if exists trg_normalizar_unidade on public.%I', t);
+    execute format(
+      'create trigger trg_normalizar_unidade before insert or update on public.%I for each row execute function public.normalizar_unidade()',
+      t
+    );
+    -- corrige o que já está gravado com nome antigo/errado (só quando reconhece)
+    execute format(
+      'update public.%I set unidade = public.unidade_codigo(unidade) where unidade is not null and unidade is distinct from public.unidade_codigo(unidade) and public.unidade_codigo(unidade) is not null',
+      t
+    );
+  end loop;
+end $$;
+
+drop trigger if exists trg_normalizar_hotel_transporte on public.transporte;
+create trigger trg_normalizar_hotel_transporte
+before insert or update on public.transporte
+for each row execute function public.normalizar_hotel_transporte();
+
+-- corrige origem/destino já gravados em Transporte (o gatilho faz a troca)
+update public.transporte set origem = origem, destino = destino
+where origem is not null or destino is not null;

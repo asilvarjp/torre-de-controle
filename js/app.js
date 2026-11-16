@@ -7,18 +7,59 @@
 
 const UNITS = [
   {code:'MTZ-CORP', label:'Matriz / Corporativo'},
-  {code:'MARUPIARA', label:'Prodigy Marupiara'},
+  {code:'MARUPIARA', label:'Marupiara by Wish'},
   {code:'WNATAL', label:'Wish Natal'},
-  {code:'WBAHIA', label:'Wish Bahia'},
+  {code:'WBAHIA', label:'Hotel da Bahia by Wish'},
   {code:'WSERRANO', label:'Wish Serrano'},
   {code:'WFOZ', label:'Wish Foz do Iguaçu'},
   {code:'PGRAMADO', label:'Prodigy Gramado'},
-  {code:'PSDU', label:'Wish Santos Dumont'},
-  {code:'LGALEAO', label:'Wish Linx Galeão'},
-  {code:'LCONFINS', label:'Wish Confins'},
+  {code:'PSDU', label:'Prodigy Santos Dumont'},
+  {code:'LGALEAO', label:'Linx Galeão'},
+  {code:'LCONFINS', label:'Linx Confins'},
   {code:'MAKAIRA', label:'Makaira Beach Resort'},
 ];
 const unitLabel = (code) => (UNITS.find(u=>u.code===code)||{}).label || code || '—';
+
+/* Nomes de hotéis: o que entrar com nome antigo ou diferente é ajustado para a
+   nomenclatura correta. O código interno (MARUPIARA, PSDU…) nunca muda; só o
+   nome exibido. Manter em sincronia com public.unidade_codigo() no schema.sql. */
+const UNIT_ALIASES = {
+  'MTZ-CORP': ['matriz','corporativo','matriz corporativo','mtz corp','mtz','grupo wish','grupo wish escritorio sp','escritorio sp','gjp matriz'],
+  'MARUPIARA': ['marupiara','marupiara resort','prodigy marupiara','marupiara by wish','gjp marupiara','gjp prodigy marupiara'],
+  'WNATAL': ['wish natal','natal','wnatal','gjp wish natal'],
+  'WBAHIA': ['wish bahia','wish hotel da bahia','hotel da bahia','hotel da bahia by wish','bahia','wbahia','gjp wish bahia'],
+  'WSERRANO': ['wish serrano','serrano','wserrano','gjp wish serrano'],
+  'WFOZ': ['wish foz','wish foz do iguacu','wish iguacu','foz do iguacu','foz','wfoz','gjp wish iguacu'],
+  'PGRAMADO': ['prodigy gramado','gramado','pgramado','gjp prodigy gramado'],
+  'PSDU': ['prodigy santos dumont','wish santos dumont','santos dumont','psdu','psdumont','gjp santos dumont'],
+  'LGALEAO': ['linx galeao','wish linx galeao','galeao','lgaleao','gjp linx galeao','gjp galeao'],
+  'LCONFINS': ['linx confins','wish confins','confins','lconfins','gjp confins'],
+  'MAKAIRA': ['makaira','makaira beach resort'],
+};
+// trechos que identificam o hotel quando o nome não bate exatamente (ordem importa)
+const UNIT_KEYWORDS = [
+  ['confins','LCONFINS'],['galeao','LGALEAO'],['makaira','MAKAIRA'],['marupiara','MARUPIARA'],
+  ['santos dumont','PSDU'],['santosdumont','PSDU'],['psdumont','PSDU'],['gramado','PGRAMADO'],['iguacu','WFOZ'],['foz','WFOZ'],
+  ['bahia','WBAHIA'],['natal','WNATAL'],['serrano','WSERRANO'],
+  ['matriz','MTZ-CORP'],['corporativo','MTZ-CORP'],['escritorio sp','MTZ-CORP'],['grupo wish','MTZ-CORP'],
+];
+const unitNorm = s => String(s==null?'':s).normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+// Código da unidade a partir de qualquer nome (antigo, com acento, em maiúsculas…); null se não reconhecer.
+function unitCodeFromName(name){
+  const n = unitNorm(name);
+  if(!n) return null;
+  for(const code of Object.keys(UNIT_ALIASES)){ if(UNIT_ALIASES[code].includes(n)) return code; }
+  for(const [kw, code] of UNIT_KEYWORDS){ if(n.includes(kw)) return code; }
+  return null;
+}
+// Para textos livres (ex.: origem/destino de um envio): só troca quando o texto é EXATAMENTE
+// um nome de hotel conhecido, para não mexer em frases como "Escritório SP - Almoxarifado".
+function canonicalHotelText(text){
+  const n = unitNorm(text);
+  if(!n) return text;
+  for(const code of Object.keys(UNIT_ALIASES)){ if(UNIT_ALIASES[code].includes(n)) return unitLabel(code); }
+  return text;
+}
 
 const ICONS = {
   dashboard:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="5" rx="1.5"/><rect x="13" y="10" width="8" height="11" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/></svg>',
@@ -825,6 +866,10 @@ function openForm(key, existing){
       if(f.type==='date') v = v===''? null : v;
       data[f.key] = v;
     });
+    // Transporte: origem/destino digitados com nome antigo de hotel viram o nome correto
+    if(mod.collection==='transporte'){
+      ['origem','destino'].forEach(k=>{ if(data[k]) data[k] = canonicalHotelText(String(data[k]).trim()); });
+    }
     const reqField = mod.fields.find(f=>f.required);
     if(reqField && !data[reqField.key]){
       toast('Preencha o campo "'+reqField.label+'".', true);

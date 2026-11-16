@@ -750,12 +750,8 @@ function impLoadSheetJS(){
 }
 
 const IMP_MESES = {JANEIRO:1,FEVEREIRO:2,MARCO:3,ABRIL:4,MAIO:5,JUNHO:6,JULHO:7,AGOSTO:8,SETEMBRO:9,OUTUBRO:10,NOVEMBRO:11,DEZEMBRO:12};
-function impUnidadeDoNome(nome){
-  const u = impNorm(nome);
-  const map = [['CONFINS','LCONFINS'],['GALEAO','LGALEAO'],['MAKAIRA','MAKAIRA'],['MARUPIARA','MARUPIARA'],['MATRIZ','MTZ-CORP'],['CORPORATIVO','MTZ-CORP'],['GRAMADO','PGRAMADO'],['SANTOSDUMONT','PSDU'],['FOZ','WFOZ'],['BAHIA','WBAHIA'],['NATAL','WNATAL'],['SERRANO','WSERRANO']];
-  for(const [k,v] of map){ if(u.includes(k)) return v; }
-  return null;
-}
+// Nome do hotel na planilha (antigo, com variações) -> código. Usa o normalizador central do app.js.
+function impUnidadeDoNome(nome){ return unitCodeFromName(nome); }
 const impClean = s => { if(s===null||s===undefined) return null; const t = String(s).trim().replace(/\s+/g,' '); return t===''?null:t; };
 function impChave(r, seq){
   if(impSerieValida(r.serie)) return 'SKYINK:'+impNorm(r.serie);
