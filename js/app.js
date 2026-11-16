@@ -240,8 +240,8 @@ const MODULES = {
     label:'Linhas Wish', icon:'linhas', collection:'linhas',
     title:'Linhas telefônicas', sub:'Linhas corporativas — Corporativo/Hotéis e Exclusive Guest',
     unitField:'unidade', statusField:'status',
-    searchFields:['numero','usuario','depto','conta'],
-    columns:['tipo_linha','unidade','numero','usuario','depto','status','valor'],
+    searchFields:['numero','ddd','usuario','depto','conta'],
+    columns:['tipo_linha','unidade','ddd','numero','usuario','depto','status','valor'],
     fields:[
       {key:'tipo_linha', label:'Linha', type:'select', options:['Corporativo e Hotéis','Exclusive Guest'], required:true, badge:true},
       {key:'numero', label:'Número', type:'text', required:true, mono:true},
@@ -590,7 +590,12 @@ function filteredRows(mod){
   }
   const q = state.search.trim().toLowerCase();
   if(q){
-    rows = rows.filter(r=> (mod.searchFields||[]).some(f=> String(r[f]||'').toLowerCase().includes(q)));
+    // Linhas: aceita o número completo com DDD, com ou sem máscara ("11 92049-7756", "11920497756")
+    const qd = q.replace(/\D/g,'');
+    rows = rows.filter(r=>
+      (mod.searchFields||[]).some(f=> String(r[f]||'').toLowerCase().includes(q)) ||
+      (mod.collection==='linhas' && qd.length>=4 && (String(r.ddd||'')+String(r.numero||'')).replace(/\D/g,'').includes(qd))
+    );
   }
   return rows;
 }
@@ -603,6 +608,11 @@ function columnLabel(mod, colKey){
 function renderCell(mod, colKey, row){
   const f = mod.fields.find(f=>f.key===colKey);
   const val = row[colKey];
+  if(mod.collection==='linhas' && colKey==='numero'){
+    const d = String(val||'').replace(/\D/g,'');
+    const fmt = d.length===9 ? d.slice(0,5)+'-'+d.slice(5) : (d.length===8 ? d.slice(0,4)+'-'+d.slice(4) : (val||'—'));
+    return '<td class="cell-mono">'+esc(fmt)+'</td>';
+  }
   if(colKey==='recomendar_substituicao'){
     const isSim = (val||'').toLowerCase()==='sim';
     return '<td><span class="badge '+(isSim?'crit':'ok')+'">'+esc(val||'—')+'</span></td>';
