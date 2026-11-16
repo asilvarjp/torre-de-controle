@@ -147,6 +147,10 @@ executivo, Por hotel, Inventário, Histórico mensal e Pendências) mais o
 - O descritivo traz **um valor de excedente PB e um colorido (R$)**, rateado
   pela participação em páginas. O sistema recalcula esse rateio por linha
   (fórmulas na tela, em "Como é calculado") e confere com o total cobrado.
+- **Dois valores diferentes:** o *custo de referência* (locação + excedentes, a
+  base de rateio entre hotéis) e o *valor faturado (ND)*, que é o "TOTAL ND" do
+  descritivo e já considera o desconto por renovação antecipada. O módulo mostra
+  e compara os dois mês a mês.
 - **Atualização mensal:** botão **Importar competência** (planilha `.xlsx`, aba
   `WISH`). O sistema mostra uma prévia com as validações (duplicidades, campos
   ausentes, fórmulas com referência errada, divergência com a aba `Plan3`,

@@ -249,12 +249,15 @@ create table if not exists public.impressoras_competencias (
   excedente_color numeric,   -- R$ de excedente colorido cobrado na competência
   franquia_pb integer,       -- vazio = não informado pelo fornecedor (pendência)
   franquia_color integer,    -- vazio = não informado pelo fornecedor (pendência)
-  desconto numeric,          -- vazio = não informado (pendência)
+  desconto numeric,          -- "Desconto por renovação antecipada"; vazio = não informado
+  total_nd numeric,          -- "TOTAL ND" do descritivo: valor efetivamente faturado
   arquivo_origem text,
   observacao text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.impressoras_competencias add column if not exists total_nd numeric;
 
 create table if not exists public.impressoras_mensal (
   id uuid primary key default gen_random_uuid(),

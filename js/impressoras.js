@@ -171,7 +171,11 @@ function impCalc(header, rows){
   corp.corCusto = corp.custo > 0 ? corp.xCO / corp.custo : null;
   corp.corPag = corp.pag > 0 ? corp.co / corp.pag : null;
   corp.backupPct = corp.n ? corp.backup / corp.n : null;
-  return { header:h, linhas, hoteis, corp, sPB, sCO, exPB, exCO,
+  // Valor faturado (ND): o descritivo informa o TOTAL ND; se não vier, é referência − desconto.
+  const desconto = impN(h.desconto);
+  const faturadoInformado = impHas(h.total_nd);
+  const faturado = faturadoInformado ? Number(h.total_nd) : corp.custo - desconto;
+  return { header:h, linhas, hoteis, corp, sPB, sCO, exPB, exCO, desconto, faturado, faturadoInformado,
            naoRateado: { pb: sPB===0 ? exPB : 0, co: sCO===0 ? exCO : 0 } };
 }
 
@@ -233,6 +237,12 @@ function impValidar(calc, header, ctx){
   const rateado = calc.corp.xPB + calc.corp.xCO;
   const okRat = Math.abs(rateado - (calc.exPB + calc.exCO - calc.naoRateado.pb - calc.naoRateado.co)) < 0.01;
   conf.push({ok: okRat, texto: 'Excedente rateado entre os equipamentos ('+fmtCurrency(rateado)+') = excedente cobrado ('+fmtCurrency(calc.exPB+calc.exCO)+')'});
+  if(impHas(hdr.total_nd)){
+    const esperado = calc.corp.custo - impN(hdr.desconto);
+    const okNd = Math.abs(esperado - Number(hdr.total_nd)) < 0.01;
+    conf.push({ok: okNd, texto: 'Valor faturado (ND) informado ('+fmtCurrency(hdr.total_nd)+') = custo de referência − desconto ('+fmtCurrency(esperado)+')'});
+    if(!okNd) add('alta','nd','Valor faturado (ND) não confere','O TOTAL ND informado difere de custo de referência − desconto por renovação antecipada.', ['Informado: '+fmtCurrency(hdr.total_nd)+' · Esperado: '+fmtCurrency(esperado)]);
+  }
   if(calc.naoRateado.pb>0 || calc.naoRateado.co>0) add('alta','nao-rateado','Excedente sem páginas para ratear','Há excedente cobrado, mas nenhuma página registrada na categoria.', ['PB: '+fmtCurrency(calc.naoRateado.pb)+' · Colorido: '+fmtCurrency(calc.naoRateado.co)]);
 
   // checagens vindas do arquivo importado
@@ -248,6 +258,17 @@ function impValidar(calc, header, ctx){
     const saiu = ctx.prevCalc.linhas.filter(p=>!curIds.has(p.impressora_id)).map(impLabel);
     add('info','saiu','Equipamento do mês anterior que não consta nesta competência','', saiu);
     add('info','novo','Equipamento novo em relação ao mês anterior','', novos.map(impLabel));
+
+    // quebra na série de leitura dos contadores, por hotel
+    const prevH = new Map(ctx.prevCalc.hoteis.map(h=>[h.unidade, h]));
+    const ruptura = [], salto = [];
+    calc.hoteis.forEach(h=>{
+      const p = prevH.get(h.unidade); if(!p) return;
+      if((p.pag === 0) !== (h.pag === 0)) ruptura.push(h.label+': '+impInt(p.pag)+' → '+impInt(h.pag)+' páginas');
+      else if(p.pag > 0 && Math.abs(h.pag/p.pag - 1) > 0.5) salto.push(h.label+': '+impInt(p.pag)+' → '+impInt(h.pag)+' páginas ('+(h.pag>p.pag?'+':'−')+impPct(Math.abs(h.pag/p.pag-1),0)+')');
+    });
+    add('media','leitura-ruptura','Hotel que passou de/para zero páginas em relação ao mês anterior','Pode ser leitura de contador não coletada e depois recuperada de uma vez (volume acumulado) — confirmar com o fornecedor antes de comparar meses.', ruptura);
+    add('info','salto-volume','Volume do hotel variou mais de 50% em relação ao mês anterior','', salto);
   }
 
   // pendências de contrato (informações que o fornecedor precisa enviar)
@@ -256,7 +277,10 @@ function impValidar(calc, header, ctx){
   if(!impHas(hdr.franquia_color)) contrato.push('Franquia contratada de páginas coloridas (por hotel/equipamento)');
   contrato.push('Tarifa unitária por página excedente (PB e colorido) — o descritivo traz só o total em R$');
   contrato.push('Volume de páginas excedentes por categoria e por hotel');
-  if(!impHas(hdr.desconto)) contrato.push('Desconto por renovação antecipada — não há valor informado');
+  if(!impHas(hdr.desconto)){
+    const pd = (ctx.prevHeader && impHas(ctx.prevHeader.desconto)) ? ' (em '+impCompLabel(ctx.prevHeader.competencia)+' foi de '+fmtCurrency(ctx.prevHeader.desconto)+')' : '';
+    contrato.push('Desconto por renovação antecipada — sem valor informado nesta competência'+pd+'; confirmar se o desconto terminou ou não foi lançado');
+  }
   contrato.push('Critério de rateio do excedente entre equipamentos (o descritivo usa participação em páginas)');
   add('contrato','contrato','Informações a solicitar ao fornecedor','Sem elas, franquia, % de utilização e excedente por categoria não podem ser calculados.', contrato);
 
@@ -409,6 +433,8 @@ function impMetodologia(){
     '<li><b>% PB do equipamento</b> = páginas PB do equipamento ÷ soma das páginas PB da competência (idem colorido)</li>'+
     '<li><b>Excedente PB do equipamento</b> = % PB × excedente PB cobrado (R$); <b>Excedente colorido</b> = % colorido × excedente colorido cobrado (R$)</li>'+
     '<li><b>Custo do equipamento</b> = locação + excedente PB + excedente colorido</li>'+
+    '<li><b>Custo de referência do serviço</b> = Σ custo dos equipamentos (locação + excedentes) — é o "valor de referência para rateio" do descritivo</li>'+
+    '<li><b>Valor faturado (ND)</b> = TOTAL ND informado no descritivo; confere com custo de referência − desconto por renovação antecipada</li>'+
     '<li><b>Custo por página</b> = custo total ÷ (páginas PB + coloridas) — valor <i>derivado</i>, não é tarifa contratual</li>'+
     '<li><b>Excedente médio por página</b> = excedente rateado ÷ páginas da categoria — também derivado</li>'+
     '<li><b>Participação do colorido no custo</b> = excedente colorido ÷ custo total do serviço</li>'+
@@ -421,6 +447,10 @@ function impOportunidades(c){
   const corp = c.corp;
   const total = corp.custo;
   if(corp.loc > 0 && total > 0) itens.push('<b>'+impPct(corp.loc/total)+'</b> do custo do serviço é <b>locação fixa</b> ('+fmtCurrency(corp.loc)+'); o excedente variável soma '+fmtCurrency(corp.ex)+'. A negociação do valor de locação por equipamento tem mais impacto do que o controle de volume.');
+  const ph = IMP.prevHeader, pc = IMP.prevCalc;
+  if(ph && pc && impN(ph.desconto) > 0 && !(c.desconto > 0)){
+    itens.push('Em <b>'+impCompLabel(ph.competencia)+'</b> o desconto por renovação antecipada foi de <b>'+fmtCurrency(ph.desconto)+'</b>'+(pc.corp.ex>0 ? ' ('+impPct(ph.desconto/pc.corp.ex,0)+' dos excedentes)' : '')+'. Nesta competência não há desconto informado e o valor faturado ficou em <b>'+fmtCurrency(c.faturado)+'</b> (mês anterior: '+fmtCurrency(pc.faturado)+'). Confirmar com o fornecedor se o desconto terminou ou não foi lançado.');
+  }
   if(corp.semImpLoc > 0) itens.push('<b>'+corp.semImp+' equipamentos</b> ('+(corp.semImp-corp.semImpNB)+' deles marcados como backup) não registraram nenhuma impressão e somam <b>'+fmtCurrency(corp.semImpLoc)+'/mês</b> de locação ('+impPct(corp.semImpLoc/Math.max(corp.loc,1e-9))+' da locação). Avaliar com cada hotel necessidade operacional, localização e criticidade antes de qualquer decisão — baixo volume não significa equipamento dispensável.');
   const semLeitura = c.hoteis.filter(h=>h.n>0 && h.pag===0);
   if(semLeitura.length) itens.push('<b>'+semLeitura.map(h=>esc(h.label)).join(' e ')+'</b> não têm nenhuma página registrada em nenhum equipamento ('+fmtCurrency(semLeitura.reduce((s,h)=>s+h.loc,0))+'/mês de locação). Antes de tratar como ociosidade, confirmar com o fornecedor se a leitura dos contadores foi coletada.');
@@ -441,7 +471,7 @@ function impOportunidades(c){
 
 function impViewDashboard(){
   const c = IMP.calc, p = IMP.prevCalc, k = c.corp, pk = p ? p.corp : null;
-  const val = impValidar(c, IMP.header, {prevCalc:p});
+  const val = impValidar(c, IMP.header, {prevCalc:p, prevHeader:IMP.prevHeader});
   const cont = {alta:0, media:0, info:0, contrato:0};
   val.itens.forEach(i=>{ cont[i.sev] += 1; });
   const outros = k.n - k.nImpr;
@@ -451,9 +481,10 @@ function impViewDashboard(){
 
   html += '<div class="kpi-grid">'+
     impKpi('impressoras', impInt(k.n), 'Equipamentos locados', impInt(k.nImpr)+' impressoras'+(outros?' + '+outros+' outros':'')+' · '+k.backup+' backup ('+(k.backupPct!==null?impPct(k.backupPct):'—')+')', impDelta(k.n, pk?pk.n:null,'int'))+
-    impKpi('compras', fmtCurrency(k.custo), 'Custo mensal do serviço', 'locação + excedentes', impDelta(k.custo, pk?pk.custo:null,'cost'))+
+    impKpi('compras', fmtCurrency(c.faturado), 'Valor faturado (ND)', (c.desconto>0 ? 'após desconto por renovação antecipada de '+fmtCurrency(c.desconto) : 'sem desconto informado')+(c.faturadoInformado?' · TOTAL ND do descritivo':''), impDelta(c.faturado, p?p.faturado:null,'cost'))+
+    impKpi('compras', fmtCurrency(k.custo), 'Custo de referência do serviço', 'locação + excedentes (base de rateio entre hotéis)', impDelta(k.custo, pk?pk.custo:null,'cost'))+
     impKpi('locados', fmtCurrency(k.loc), 'Custo mensal de locação', k.semLoc ? k.semLoc+' equip. sem valor informado' : '', impDelta(k.loc, pk?pk.loc:null,'cost'))+
-    impKpi('depreciacao', fmtCurrency(k.ex), 'Custo mensal de impressões (excedentes)', 'PB '+fmtCurrency(k.xPB)+' · colorido '+fmtCurrency(k.xCO), impDelta(k.ex, pk?pk.ex:null,'cost'))+
+    impKpi('depreciacao', fmtCurrency(k.ex), 'Custo mensal de impressões (excedentes)', 'PB '+fmtCurrency(k.xPB)+' · colorido '+fmtCurrency(k.xCO)+(c.desconto>0 && k.ex>0 ? ' · desconto cobre '+impPct(Math.min(c.desconto/k.ex,9.99),0) : ''), impDelta(k.ex, pk?pk.ex:null,'cost'))+
     impKpi('inventario', impInt(k.pb), 'Páginas PB', '', impDelta(k.pb, pk?pk.pb:null,'int'))+
     impKpi('inventario', impInt(k.co), 'Páginas coloridas', k.corPag!==null ? impPct(k.corPag)+' das páginas' : '', impDelta(k.co, pk?pk.co:null,'int'))+
     impKpi('compras', k.corCusto!==null ? impPct(k.corCusto) : '—', 'Participação do colorido no custo', 'excedente colorido ÷ custo total')+
@@ -626,7 +657,8 @@ function impViewHistorico(){
   // comparação mês atual x anterior
   const rowsCmp = [
     ['Custo de locação', c=>c.corp.loc, 'money'], ['Volume PB (páginas)', c=>c.corp.pb, 'int'], ['Volume colorido (páginas)', c=>c.corp.co, 'int'],
-    ['Gasto com PB (excedente)', c=>c.corp.xPB, 'money'], ['Gasto com colorido (excedente)', c=>c.corp.xCO, 'money'], ['Excedentes (total)', c=>c.corp.ex, 'money'], ['Custo total do serviço', c=>c.corp.custo, 'money'],
+    ['Gasto com PB (excedente)', c=>c.corp.xPB, 'money'], ['Gasto com colorido (excedente)', c=>c.corp.xCO, 'money'], ['Excedentes (total)', c=>c.corp.ex, 'money'], ['Custo de referência (locação + excedentes)', c=>c.corp.custo, 'money'],
+    ['Desconto por renovação antecipada', c=>c.desconto, 'desc'], ['Valor faturado (ND)', c=>c.faturado, 'money'],
   ];
   const f = (v,k)=> k==='int' ? impInt(v) : fmtCurrency(v);
   html += '<div class="panel"><h2>'+esc(impCompLabel(sel.header.competencia))+' × '+(selPrev?esc(impCompLabel(selPrev.header.competencia)):'mês anterior')+'</h2>'+
@@ -638,16 +670,19 @@ function impViewHistorico(){
   // evolução
   html += '<div class="panel"><h2>Evolução mensal</h2><div class="panel-sub">R$ por competência</div>'+
     impLineChart(H.map(x=>impCompShort(x.header.competencia)), [
-      {nome:'Custo total', color:'var(--accent)', values:H.map(x=>x.calc.corp.custo)},
+      {nome:'Valor faturado (ND)', color:'var(--ink)', values:H.map(x=>x.calc.faturado)},
+      {nome:'Custo de referência', color:'var(--accent)', values:H.map(x=>x.calc.corp.custo)},
       {nome:'Locação', color:'var(--series-3)', values:H.map(x=>x.calc.corp.loc)},
       {nome:'Excedentes', color:'var(--brass)', values:H.map(x=>x.calc.corp.ex)},
     ])+'</div>';
 
-  // tabela por competência
-  html += '<div class="panel"><h2>Competências</h2><div class="table-scroll"><table class="imp-wide"><thead><tr><th>Competência</th><th class="num-cell">Equip.</th><th class="num-cell">Locação</th><th class="num-cell">Pág. PB</th><th class="num-cell">Pág. cor</th><th class="num-cell">Exced. PB</th><th class="num-cell">Exced. cor</th><th class="num-cell">Custo total</th><th class="num-cell">Var. R$</th><th class="num-cell">Var. %</th></tr></thead><tbody>'+
-    H.slice().reverse().map((x,ix,arr)=>{ const p = arr[ix+1]; const k = x.calc.corp; const d = p ? k.custo - p.calc.corp.custo : null;
-      return '<tr><td><b>'+esc(impCompLabel(x.header.competencia))+'</b></td><td class="num-cell">'+k.n+'</td><td class="num-cell">'+fmtCurrency(k.loc)+'</td><td class="num-cell">'+impInt(k.pb)+'</td><td class="num-cell">'+impInt(k.co)+'</td><td class="num-cell">'+fmtCurrency(k.xPB)+'</td><td class="num-cell">'+fmtCurrency(k.xCO)+'</td><td class="num-cell"><b>'+fmtCurrency(k.custo)+'</b></td>'+
-        '<td class="num-cell imp-delta '+(d>0?'bad':(d<0?'good':'flat'))+'">'+(d===null?'—':(d>0?'+':(d<0?'−':''))+fmtCurrency(Math.abs(d)))+'</td><td class="num-cell imp-delta '+(d>0?'bad':(d<0?'good':'flat'))+'">'+(d===null||p.calc.corp.custo===0?'—':(d>0?'+':(d<0?'−':''))+impPct(Math.abs(d/p.calc.corp.custo)))+'</td></tr>'; }).join('')+'</tbody></table></div></div>';
+  // tabela por competência (a variação é sobre o valor faturado: o que efetivamente foi pago)
+  html += '<div class="panel"><h2>Competências</h2><div class="table-scroll"><table class="imp-wide"><thead><tr><th>Competência</th><th class="num-cell">Equip.</th><th class="num-cell">Locação</th><th class="num-cell">Pág. PB</th><th class="num-cell">Pág. cor</th><th class="num-cell">Exced. PB</th><th class="num-cell">Exced. cor</th><th class="num-cell">Referência</th><th class="num-cell">Desconto</th><th class="num-cell">Faturado (ND)</th><th class="num-cell">Var. faturado R$</th><th class="num-cell">Var. %</th></tr></thead><tbody>'+
+    H.slice().reverse().map((x,ix,arr)=>{ const p = arr[ix+1]; const k = x.calc.corp; const d = p ? x.calc.faturado - p.calc.faturado : null;
+      const tone = d>0?'bad':(d<0?'good':'flat');
+      return '<tr><td><b>'+esc(impCompLabel(x.header.competencia))+'</b></td><td class="num-cell">'+k.n+'</td><td class="num-cell">'+fmtCurrency(k.loc)+'</td><td class="num-cell">'+impInt(k.pb)+'</td><td class="num-cell">'+impInt(k.co)+'</td><td class="num-cell">'+fmtCurrency(k.xPB)+'</td><td class="num-cell">'+fmtCurrency(k.xCO)+'</td><td class="num-cell">'+fmtCurrency(k.custo)+'</td><td class="num-cell">'+(x.calc.desconto>0?fmtCurrency(x.calc.desconto):'—')+'</td><td class="num-cell"><b>'+fmtCurrency(x.calc.faturado)+'</b></td>'+
+        '<td class="num-cell imp-delta '+tone+'">'+(d===null?'—':(d>0?'+':(d<0?'−':''))+fmtCurrency(Math.abs(d)))+'</td><td class="num-cell imp-delta '+tone+'">'+(d===null||p.calc.faturado===0?'—':(d>0?'+':(d<0?'−':''))+impPct(Math.abs(d/p.calc.faturado)))+'</td></tr>'; }).join('')+'</tbody></table></div>'+
+    '<div class="imp-fine">Referência = locação + excedentes (base de rateio entre hotéis). Faturado (ND) = TOTAL ND do descritivo = referência − desconto por renovação antecipada.</div></div>';
 
   // custo por hotel ao longo do tempo
   const hot = new Set(); H.forEach(x=>x.calc.hoteis.forEach(h=>hot.add(h.unidade)));
@@ -663,7 +698,7 @@ function impViewHistorico(){
 /* ----------------------------- Pendências ----------------------------- */
 const IMP_SEV = {alta:['Alta','crit'], media:['Média','warn'], info:['Informativa','neutral'], contrato:['Contrato / fornecedor','neutral']};
 function impViewPendencias(){
-  const v = impValidar(IMP.calc, IMP.header, {prevCalc:IMP.prevCalc});
+  const v = impValidar(IMP.calc, IMP.header, {prevCalc:IMP.prevCalc, prevHeader:IMP.prevHeader});
   const cont = {alta:0, media:0, info:0, contrato:0};
   v.itens.forEach(i=>{ cont[i.sev]++; });
   let html = '<div class="panel"><h2>Qualidade e consistência dos dados — '+esc(impCompLabel(IMP.comp))+'</h2><div class="panel-sub">Nada é completado por estimativa: o que falta fica listado aqui para validação.</div>'+
@@ -766,6 +801,19 @@ function impParseSheet(ws){
         else if(IMP_MESES[n]) mes = IMP_MESES[n];
       }
       if(typeof v==='number' && v>=2000 && v<=2100 && ano===null) ano = v;
+    });
+  }
+
+  // resumo à direita da tabela: desconto por renovação antecipada e TOTAL ND (valor faturado)
+  hdr.desconto = null; hdr.total_nd = null;
+  for(let i=0;i<aoa.length;i++){
+    (aoa[i]||[]).forEach((v,j)=>{
+      if(typeof v !== 'string') return;
+      const n = impNorm(v);
+      const right = () => { const r = aoa[i]||[]; for(let k=j+1;k<r.length;k++){ if(typeof r[k]==='number') return r[k]; } return null; };
+      const r2 = x => x === null ? null : Math.round(x*100)/100;
+      if(n.includes('DESCONTOPORRENOVACAO')) hdr.desconto = r2(right());
+      else if(n === 'TOTALND') hdr.total_nd = r2(right());
     });
   }
 
@@ -874,7 +922,7 @@ function impPreview(P, close){
     patrimonio: r.existente && r.existente.patrimonio ? r.existente.patrimonio : (r.patrimonio||''), serie: r.existente && r.existente.serie ? r.existente.serie : (r.serie||''),
     modelo:r.modelo||'', tipo: /fragment/i.test(r.modelo||'') ? 'Fragmentadora' : 'Impressora', obs:r.obs||'', backup:/backup/i.test(r.obs||''),
     cnpj:r.cnpj||'', endereco:r.endereco||'', loc:r.valor, pb:impN(r.pb), co:impN(r.co), linha:r.linha }));
-  const headerVirt = { total_pb:P.hdr.total_pb, total_color:P.hdr.total_color, excedente_pb:P.hdr.excedente_pb, excedente_color:P.hdr.excedente_color, franquia_pb:null, franquia_color:null, desconto:null };
+  const headerVirt = { total_pb:P.hdr.total_pb, total_color:P.hdr.total_color, excedente_pb:P.hdr.excedente_pb, excedente_color:P.hdr.excedente_color, franquia_pb:null, franquia_color:null, desconto:P.hdr.desconto, total_nd:P.hdr.total_nd };
   const calc = impCalc(headerVirt, virt);
 
   // divergências de rateio da planilha de origem x recálculo
@@ -910,7 +958,9 @@ function impPreview(P, close){
     '<tr><td>Páginas PB (informado × soma das linhas)</td><td class="num-cell">'+(impHas(P.hdr.total_pb)?impInt(P.hdr.total_pb):'—')+' × '+impInt(calc.sPB)+'</td></tr>'+
     '<tr><td>Páginas coloridas (informado × soma das linhas)</td><td class="num-cell">'+(impHas(P.hdr.total_color)?impInt(P.hdr.total_color):'—')+' × '+impInt(calc.sCO)+'</td></tr>'+
     '<tr><td>Excedente PB / colorido cobrado</td><td class="num-cell">'+(impHas(P.hdr.excedente_pb)?fmtCurrency(P.hdr.excedente_pb):'—')+' / '+(impHas(P.hdr.excedente_color)?fmtCurrency(P.hdr.excedente_color):'—')+'</td></tr>'+
-    '<tr><td><b>Custo total do serviço (recalculado)</b></td><td class="num-cell"><b>'+fmtCurrency(calc.corp.custo)+'</b></td></tr></tbody></table>'+
+    '<tr><td><b>Custo de referência (locação + excedentes, recalculado)</b></td><td class="num-cell"><b>'+fmtCurrency(calc.corp.custo)+'</b></td></tr>'+
+    '<tr><td>Desconto por renovação antecipada</td><td class="num-cell">'+(impHas(P.hdr.desconto)?fmtCurrency(P.hdr.desconto):'não informado')+'</td></tr>'+
+    '<tr><td><b>Valor faturado (TOTAL ND)</b></td><td class="num-cell"><b>'+(impHas(P.hdr.total_nd)?fmtCurrency(P.hdr.total_nd):'não informado')+'</b></td></tr></tbody></table>'+
     '<div class="imp-chips" style="margin:12px 0 4px;">'+Object.keys(IMP_SEV).map(k=>'<span>'+impBadge(IMP_SEV[k][0],IMP_SEV[k][1])+' '+cont[k]+'</span>').join('')+'</div>'+
     '<ul class="imp-ul">'+val.conferencias.map(c=>'<li>'+(c.ok?'<span class="imp-ok">✓</span>':'<span class="imp-bad">✗</span>')+' '+esc(c.texto)+'</li>').join('')+'</ul>'+
     val.itens.filter(i=>i.sev==='alta' || i.sev==='media').map(i=>'<details class="imp-pv"><summary>'+impBadge(IMP_SEV[i.sev][0],IMP_SEV[i.sev][1])+' <b>'+esc(i.titulo)+'</b> ('+i.itens.length+')</summary><ul class="imp-ul">'+i.itens.slice(0,40).map(t=>'<li>'+esc(t)+'</li>').join('')+(i.itens.length>40?'<li>… e mais '+(i.itens.length-40)+'</li>':'')+'</ul></details>').join('')+
@@ -937,7 +987,8 @@ async function impCommit(P, comp, hdr, close){
   try{
     say('Gravando totais da competência…');
     const { error: e1 } = await supabaseClient.from('impressoras_competencias').upsert({
-      competencia: comp, total_pb: hdr.total_pb, total_color: hdr.total_color, excedente_pb: hdr.excedente_pb, excedente_color: hdr.excedente_color, arquivo_origem: P.arquivo }, {onConflict:'competencia'});
+      competencia: comp, total_pb: hdr.total_pb, total_color: hdr.total_color, excedente_pb: hdr.excedente_pb, excedente_color: hdr.excedente_color,
+      desconto: hdr.desconto, total_nd: hdr.total_nd, arquivo_origem: P.arquivo }, {onConflict:'competencia'});
     if(e1) throw e1;
 
     const eqByChave = new Map(IMP.equip.map(e=>[e.chave_origem, e]));
