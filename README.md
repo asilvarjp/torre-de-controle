@@ -136,6 +136,25 @@ serve.ps1              servidor local só para testes (não é usado no GitHub P
 | Depreciação | Vida útil, valor residual e recomendação de substituição de ativos |
 | Linhas Wish | Linhas telefônicas corporativas — Corporativo/Hotéis e Exclusive Guest |
 
+## Perfis de acesso e Lixeira
+
+Cada pessoa tem um perfil, aplicado no próprio banco (não dá para burlar pelo
+navegador):
+
+| Perfil | Pode |
+|---|---|
+| **Administrador** | Tudo: cadastrar, editar, excluir, restaurar da Lixeira e gerenciar usuários |
+| **Editor** | Consultar, cadastrar e editar — **não** exclui |
+| **Leitor** | Somente consultar |
+
+- Quem é convidado entra como **Leitor**. Um administrador muda o perfil em
+  **Administração → Usuários**.
+- Tudo que é excluído (de qualquer módulo, inclusive por SQL) é copiado para a
+  **Lixeira** antes de sumir. Em **Administração → Lixeira**, um administrador
+  restaura o item no módulo de origem com um clique.
+- Para recuperar o acesso de administrador pelo SQL Editor do Supabase:
+  `update public.perfis set papel = 'admin' where email = 'seu@email';`
+
 ## Segurança — leia antes de usar em produção
 
 - As senhas do TeamViewer ficam **ocultas na tela por padrão**, mas são

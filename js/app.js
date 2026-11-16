@@ -42,6 +42,8 @@ const ICONS = {
   check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="5,13 10,18 19,7"/></svg>',
   alert:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10.6 3.9L2.4 18.5A1.5 1.5 0 0 0 3.7 21h16.6a1.5 1.5 0 0 0 1.3-2.5L13.4 3.9a1.5 1.5 0 0 0-2.8 0z"/><line x1="12" y1="9.5" x2="12" y2="13.5"/><circle cx="12" cy="16.5" r=".2" fill="currentColor" stroke-width="2.2"/></svg>',
   logout:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16,17 21,12 16,7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>',
+  usuarios:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8"/><path d="M18 14.2a6.5 6.5 0 0 1 3.5 5.8"/></svg>',
+  undo:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h11a5 5 0 0 1 0 10H8"/><polyline points="8,5 4,9 8,13"/></svg>',
   lock:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>',
 };
 const ic = (name)=> ICONS[name] || '';
@@ -252,6 +254,12 @@ const MODULES = {
 };
 const MODULE_ORDER = ['inventario','estoque','locados','compras','licencas','transporte','impressoras','teamviewer','depreciacao','linhas'];
 
+// Telas de administração (só aparecem para o perfil "admin").
+const SPECIAL_VIEWS = {
+  usuarios:{label:'Usuários', icon:'usuarios', title:'Usuários e permissões', sub:'Defina o que cada pessoa pode fazer no sistema'},
+  lixeira:{label:'Lixeira', icon:'trash', title:'Lixeira', sub:'Itens excluídos — restaure se a exclusão foi um engano'},
+};
+
 /* -------------------------- Custo de substituição de ativos -------------------------- */
 // Menor preço por item entre os fornecedores do Mapa de Cotação (MINI DESKTOP MAIS
 // SERVIÇOS): Desktop já cotado com garantia estendida (Concórdia, 3 anos) + Monitor
@@ -288,6 +296,36 @@ function esc(v){
 let supabaseClient = null;
 let currentUser = null;
 
+/* -------------------------- Perfis de acesso -------------------------- */
+// admin: tudo · editor: consulta, cadastra e edita (não exclui) · leitor: só consulta.
+// A regra de verdade está no banco (RLS, ver supabase/schema.sql); aqui só
+// escondemos os botões que o perfil não pode usar.
+let currentRole = 'leitor';
+const ROLE_LABEL = {admin:'Administrador', editor:'Editor', leitor:'Leitor'};
+const canWrite  = ()=> currentRole==='admin' || currentRole==='editor';
+const canDelete = ()=> currentRole==='admin';
+const isAdmin   = ()=> currentRole==='admin';
+
+async function loadMyRole(uid){
+  const { data, error } = await supabaseClient.from('perfis').select('papel').eq('id', uid).maybeSingle();
+  if(error){
+    // Tabela "perfis" ainda não existe (schema.sql atualizado não foi rodado):
+    // o banco ainda aceita tudo, então mantém o comportamento antigo.
+    const missing = error.code==='42P01' || error.code==='PGRST205' || /perfis/i.test(error.message||'');
+    if(missing) return 'admin';
+    console.error(error);
+    return 'leitor';
+  }
+  return (data && data.papel) || 'leitor';
+}
+
+// Traduz os erros de permissão do banco para uma frase clara.
+function friendlyError(e, acao){
+  if(e && (e.code==='42501' || /row-level security/i.test(e.message||'')))
+    return 'Seu perfil ('+ROLE_LABEL[currentRole]+') não tem permissão para '+acao+'.';
+  return (e && e.message) ? e.message : 'erro desconhecido';
+}
+
 function configIsPlaceholder(){
   const c = window.SUPABASE_CONFIG || {};
   return !c.url || !c.anonKey || c.url.includes('SEU-PROJETO') || c.anonKey.includes('COLE_AQUI');
@@ -321,12 +359,15 @@ const Store = {
     return row.id;
   },
   async update(table, id, data){
-    const { error } = await supabaseClient.from(table).update(data).eq('id', id);
+    const { data: rows, error } = await supabaseClient.from(table).update(data).eq('id', id).select('id');
     if(error) throw error;
+    // Quando a regra de segurança bloqueia, o banco não dá erro: só afeta 0 linhas.
+    if(!rows || rows.length===0) throw {code:'42501', message:'row-level security: nenhuma linha alterada'};
   },
   async remove(table, id){
-    const { error } = await supabaseClient.from(table).delete().eq('id', id);
+    const { data: rows, error } = await supabaseClient.from(table).delete().eq('id', id).select('id');
     if(error) throw error;
+    if(!rows || rows.length===0) throw {code:'42501', message:'row-level security: nenhuma linha excluída'};
   },
 };
 
@@ -353,12 +394,20 @@ function renderSidebar(){
     const count = moduleCounts[key] || 0;
     html += '<button class="nav-btn '+(state.moduleKey===key?'active':'')+'" data-mod="'+key+'"><span class="icon">'+ic(m.icon)+'</span><span class="lbl-full">'+esc(m.label)+'</span>'+(count?('<span class="count">'+count+'</span>'):'')+'</button>';
   });
+  if(isAdmin()){
+    html += '<div class="nav-section-label">Administração</div>';
+    Object.keys(SPECIAL_VIEWS).forEach(key=>{
+      const v = SPECIAL_VIEWS[key];
+      html += '<button class="nav-btn '+(state.moduleKey===key?'active':'')+'" data-mod="'+key+'"><span class="icon">'+ic(v.icon)+'</span><span class="lbl-full">'+esc(v.label)+'</span></button>';
+    });
+  }
   nav.innerHTML = html;
   nav.querySelectorAll('.nav-btn').forEach(btn=>{
     btn.addEventListener('click', ()=> switchModule(btn.dataset.mod));
   });
   const userChip = document.getElementById('syncStatus');
   userChip.innerHTML = '<span class="dot"></span><span class="user-email" title="'+esc(currentUser?currentUser.email:'')+'">'+esc(currentUser?currentUser.email:'')+'</span>'+
+    '<span class="role-badge" title="Seu perfil de acesso">'+esc(ROLE_LABEL[currentRole]||currentRole)+'</span>'+
     '<button class="icon-btn" id="logoutBtn" title="Sair"><span class="icon">'+ic('logout')+'</span></button>';
   const lb = document.getElementById('logoutBtn');
   if(lb) lb.addEventListener('click', async ()=>{ await supabaseClient.auth.signOut(); });
@@ -372,6 +421,8 @@ function switchModule(key){
   renderSidebar();
   renderTopbar();
   if(key === 'dashboard'){ renderDashboard(); }
+  else if(key === 'usuarios'){ renderUsuarios(); }
+  else if(key === 'lixeira'){ renderLixeira(); }
   else { subscribeModule(key); }
 }
 
@@ -401,10 +452,12 @@ function updateNavCounts(){
 
 /* -------------------------- Topbar -------------------------- */
 function renderTopbar(){
-  const mod = state.moduleKey==='dashboard' ? null : MODULES[state.moduleKey];
-  document.getElementById('topbarIcon').innerHTML = ic(mod?mod.icon:'dashboard');
-  document.getElementById('topbarTitle').textContent = mod?mod.title:'Painel geral';
-  document.getElementById('topbarSub').textContent = mod?mod.sub:'Visão consolidada de todas as unidades Wish Hotels & Resorts';
+  const special = SPECIAL_VIEWS[state.moduleKey];
+  const mod = (state.moduleKey==='dashboard' || special) ? null : MODULES[state.moduleKey];
+  const head = special || mod;
+  document.getElementById('topbarIcon').innerHTML = ic(head?head.icon:'dashboard');
+  document.getElementById('topbarTitle').textContent = head?head.title:'Painel geral';
+  document.getElementById('topbarSub').textContent = head?head.sub:'Visão consolidada de todas as unidades Wish Hotels & Resorts';
 
   const ctrls = document.getElementById('topbarControls');
   if(!mod){ ctrls.innerHTML=''; return; }
@@ -423,7 +476,9 @@ function renderTopbar(){
     html += '<select id="itemFilterSel" class="field-select"><option value="">Todos os itens</option>'+itemFilterOptionsHtml()+'</select>';
   }
   html += '<div class="search-box"><span class="icon">'+ic('search')+'</span><input id="searchInput" type="text" placeholder="Buscar…" value="'+esc(state.search)+'"/></div>';
-  html += '<button class="btn btn-primary" id="btnNew"><span class="icon">'+ic('plus')+'</span>Novo</button>';
+  if(canWrite()){
+    html += '<button class="btn btn-primary" id="btnNew"><span class="icon">'+ic('plus')+'</span>Novo</button>';
+  }
   ctrls.innerHTML = html;
 
   const selEl = document.getElementById('unidadeFilterSel');
@@ -433,7 +488,8 @@ function renderTopbar(){
   const itemEl = document.getElementById('itemFilterSel');
   if(itemEl) itemEl.addEventListener('change', e=>{ state.itemFilter = e.target.value; renderModuleTable(state.moduleKey); });
   document.getElementById('searchInput').addEventListener('input', e=>{ state.search = e.target.value; renderModuleTable(state.moduleKey); });
-  document.getElementById('btnNew').addEventListener('click', ()=> openForm(state.moduleKey, null));
+  const newBtn = document.getElementById('btnNew');
+  if(newBtn) newBtn.addEventListener('click', ()=> openForm(state.moduleKey, null));
 }
 
 // Opções (itens distintos comprados) para o filtro do módulo Compras.
@@ -573,7 +629,7 @@ function renderModuleTable(key){
   html += '<div class="table-wrap">';
   if(rows.length === 0){
     html += '<div class="table-empty"><span class="icon">'+ic(mod.icon)+'</span><b>Nenhum registro encontrado</b>'+
-      (state.search||state.unidadeFilter||state.itemFilter ? 'Ajuste os filtros ou a busca.' : 'Clique em "Novo" para cadastrar o primeiro registro.')+'</div>';
+      (state.search||state.unidadeFilter||state.itemFilter ? 'Ajuste os filtros ou a busca.' : (canWrite() ? 'Clique em "Novo" para cadastrar o primeiro registro.' : 'Ainda não há registros neste módulo.'))+'</div>';
   } else {
     html += '<div class="result-count">'+rows.length+' registro'+(rows.length===1?'':'s')+'</div>';
     html += '<div class="table-scroll"><table><thead><tr>';
@@ -583,8 +639,8 @@ function renderModuleTable(key){
       html += '<tr data-id="'+row.id+'">';
       mod.columns.forEach(c=> html += renderCell(mod, c, row));
       html += '<td><div class="cell-actions">'+
-        '<button class="icon-btn edit-btn" data-id="'+row.id+'" title="Editar"><span class="icon">'+ic('edit')+'</span></button>'+
-        '<button class="icon-btn danger del-btn" data-id="'+row.id+'" title="Excluir"><span class="icon">'+ic('trash')+'</span></button>'+
+        (canWrite() ? '<button class="icon-btn edit-btn" data-id="'+row.id+'" title="Editar"><span class="icon">'+ic('edit')+'</span></button>' : '')+
+        (canDelete() ? '<button class="icon-btn danger del-btn" data-id="'+row.id+'" title="Excluir"><span class="icon">'+ic('trash')+'</span></button>' : '')+
         '</div></td></tr>';
     });
     html += '</tbody></table></div>';
@@ -599,10 +655,10 @@ function renderModuleTable(key){
   content.querySelectorAll('.del-btn').forEach(b=> b.addEventListener('click', async ()=>{
     const row = state.rows.find(r=>r.id===b.dataset.id);
     const label = row[mod.searchFields[0]] || row.id;
-    const ok = await confirmDialog('Excluir o registro "'+label+'"? Esta ação não pode ser desfeita.');
+    const ok = await confirmDialog('Excluir o registro "'+label+'"? Ele vai para a Lixeira e um administrador pode restaurá-lo depois.');
     if(!ok) return;
-    try{ await Store.remove(mod.collection, row.id); toast('Registro excluído.'); }
-    catch(e){ console.error(e); toast('Não foi possível excluir.'+((e&&e.message)?' ('+e.message+')':''), true); }
+    try{ await Store.remove(mod.collection, row.id); toast('Registro excluído. Dá para restaurar pela Lixeira.'); }
+    catch(e){ console.error(e); toast('Não foi possível excluir: '+friendlyError(e,'excluir registros'), true); }
   }));
   content.querySelectorAll('.reveal-btn').forEach(b=> b.addEventListener('click', ()=>{
     state.revealed[b.dataset.id] = !state.revealed[b.dataset.id];
@@ -616,6 +672,7 @@ function renderModuleTable(key){
 
 /* -------------------------- Formulário (modal) -------------------------- */
 function openForm(key, existing){
+  if(!canWrite()){ toast('Seu perfil ('+ROLE_LABEL[currentRole]+') só permite consultar.', true); return; }
   const mod = MODULES[key];
   const root = document.getElementById('modalRoot');
   let fieldsHtml = '';
@@ -694,8 +751,7 @@ function openForm(key, existing){
       close();
     }catch(e){
       console.error(e);
-      const detail = (e && e.message) ? ' ('+e.message+')' : '';
-      toast('Não foi possível salvar o registro.'+detail, true);
+      toast('Não foi possível salvar o registro: '+friendlyError(e,'cadastrar ou editar registros'), true);
     }
   });
 }
@@ -798,6 +854,101 @@ function renderDashboard(){
   });
 }
 
+/* -------------------------- Administração: usuários -------------------------- */
+async function renderUsuarios(){
+  if(!isAdmin()) return;
+  const content = document.getElementById('content');
+  content.innerHTML = '<div class="table-wrap"><div class="table-empty">Carregando…</div></div>';
+  const { data, error } = await supabaseClient.from('perfis').select('*').order('created_at', {ascending:true});
+  if(state.moduleKey!=='usuarios') return;
+  if(error){
+    content.innerHTML = '<div class="table-wrap"><div class="table-empty"><b>Não foi possível carregar os usuários</b>'+esc(error.message)+'</div></div>';
+    return;
+  }
+  let html = '<div class="panel perm-legend"><h2>O que cada perfil pode fazer</h2>'+
+    '<div class="panel-sub">Quem é convidado entra como Leitor até um administrador mudar o perfil aqui.</div>'+
+    '<div class="perm-grid">'+
+      '<div><span class="badge ok">Administrador</span><p>Tudo: cadastra, edita, exclui, restaura itens da Lixeira e gerencia usuários.</p></div>'+
+      '<div><span class="badge warn">Editor</span><p>Consulta, cadastra e edita. Não consegue excluir.</p></div>'+
+      '<div><span class="badge neutral">Leitor</span><p>Somente consulta.</p></div>'+
+    '</div></div>';
+  html += '<div class="table-wrap"><div class="table-scroll"><table><thead><tr><th>E-mail</th><th>Perfil</th><th>Desde</th></tr></thead><tbody>';
+  (data||[]).forEach(p=>{
+    const self = currentUser && p.id===currentUser.id;
+    html += '<tr><td>'+esc(p.email||'—')+(self?' <span class="badge neutral">você</span>':'')+'</td><td>'+
+      '<select class="role-sel field-select" data-id="'+p.id+'" '+(self?'disabled title="Você não pode alterar o próprio perfil"':'')+'>'+
+      ['admin','editor','leitor'].map(r=>'<option value="'+r+'" '+(p.papel===r?'selected':'')+'>'+ROLE_LABEL[r]+'</option>').join('')+
+      '</select></td><td class="cell-mono">'+fmtDate(p.created_at)+'</td></tr>';
+  });
+  html += '</tbody></table></div></div>';
+  content.innerHTML = html;
+  content.querySelectorAll('.role-sel').forEach(sel=> sel.addEventListener('change', async ()=>{
+    const { data: upd, error: err } = await supabaseClient.from('perfis').update({papel: sel.value}).eq('id', sel.dataset.id).select('id');
+    if(err || !upd || !upd.length){
+      toast('Não foi possível alterar o perfil.'+(err?' ('+err.message+')':''), true);
+      renderUsuarios();
+      return;
+    }
+    toast('Perfil atualizado.');
+  }));
+}
+
+/* -------------------------- Administração: lixeira -------------------------- */
+let lixeiraFiltro = '';
+function lixeiraItemLabel(r){
+  const d = r.dados || {};
+  const mod = MODULES[r.tabela];
+  const keys = mod ? mod.searchFields.concat(mod.columns) : Object.keys(d);
+  for(const k of keys){ if(d[k] && typeof d[k]==='string') return d[k]; }
+  return r.registro_id || '—';
+}
+
+async function renderLixeira(){
+  if(!isAdmin()) return;
+  const content = document.getElementById('content');
+  content.innerHTML = '<div class="table-wrap"><div class="table-empty">Carregando…</div></div>';
+  const { data, error } = await supabaseClient.from('lixeira').select('*')
+    .is('restaurado_em', null).order('excluido_em', {ascending:false}).limit(500);
+  if(state.moduleKey!=='lixeira') return;
+  if(error){
+    content.innerHTML = '<div class="table-wrap"><div class="table-empty"><b>Não foi possível carregar a lixeira</b>'+esc(error.message)+'</div></div>';
+    return;
+  }
+  const all = data || [];
+  const rows = lixeiraFiltro ? all.filter(r=> r.tabela===lixeiraFiltro) : all;
+
+  let html = '<div class="lixeira-bar"><select id="lixeiraFiltroSel" class="field-select"><option value="">Todos os módulos</option>'+
+    MODULE_ORDER.map(k=> '<option value="'+k+'" '+(lixeiraFiltro===k?'selected':'')+'>'+esc(MODULES[k].label)+'</option>').join('')+
+    '</select><span class="result-count" style="padding:0;">'+rows.length+' item'+(rows.length===1?'':'ns')+' na lixeira</span></div>';
+  html += '<div class="table-wrap">';
+  if(rows.length===0){
+    html += '<div class="table-empty"><span class="icon">'+ic('trash')+'</span><b>Lixeira vazia</b>Nada excluído'+(lixeiraFiltro?' neste módulo':'')+' para restaurar.</div>';
+  } else {
+    html += '<div class="table-scroll"><table><thead><tr><th>Módulo</th><th>Item</th><th>Unidade</th><th>Excluído por</th><th>Quando</th><th></th></tr></thead><tbody>';
+    rows.forEach(r=>{
+      const mod = MODULES[r.tabela];
+      html += '<tr><td>'+esc(mod?mod.label:r.tabela)+'</td>'+
+        '<td>'+esc(lixeiraItemLabel(r))+'</td>'+
+        '<td>'+esc(unitLabel((r.dados||{}).unidade))+'</td>'+
+        '<td>'+esc(r.excluido_por_email||'—')+'</td>'+
+        '<td class="cell-mono">'+esc(new Date(r.excluido_em).toLocaleString('pt-BR'))+'</td>'+
+        '<td><div class="cell-actions"><button class="btn btn-sm restore-btn" data-id="'+r.id+'"><span class="icon">'+ic('undo')+'</span>Restaurar</button></div></td></tr>';
+    });
+    html += '</tbody></table></div>';
+  }
+  html += '</div>';
+  content.innerHTML = html;
+
+  document.getElementById('lixeiraFiltroSel').addEventListener('change', e=>{ lixeiraFiltro = e.target.value; renderLixeira(); });
+  content.querySelectorAll('.restore-btn').forEach(btn=> btn.addEventListener('click', async ()=>{
+    btn.disabled = true;
+    const { error: err } = await supabaseClient.rpc('restaurar_da_lixeira', {p_id: btn.dataset.id});
+    if(err){ toast('Não foi possível restaurar: '+err.message, true); btn.disabled = false; return; }
+    toast('Item restaurado no módulo de origem.');
+    renderLixeira();
+  }));
+}
+
 /* -------------------------- Autenticação -------------------------- */
 function showScreen(name){
   ['loadingScreen','configScreen','loginScreen','recoveryScreen','app'].forEach(id=>{
@@ -854,12 +1005,26 @@ function wireRecoveryScreen(){
   });
 }
 
-function startApp(user){
+let appStartedFor = null;
+async function startApp(user){
+  // O Supabase reenvia o evento de login ao renovar a sessão / voltar para a aba;
+  // nesses casos não reiniciamos a tela.
+  if(appStartedFor === user.id){ currentUser = user; return; }
+  appStartedFor = user.id;
   currentUser = user;
+  currentRole = await loadMyRole(user.id);
+  state.moduleKey = 'dashboard';
   showScreen('app');
   renderSidebar();
   renderTopbar();
   renderDashboard();
+}
+
+function resetSession(){
+  appStartedFor = null;
+  currentUser = null;
+  currentRole = 'leitor';
+  if(typeof state.unsub === 'function'){ state.unsub(); state.unsub = null; }
 }
 
 /* -------------------------- Boot -------------------------- */
@@ -878,8 +1043,10 @@ function startApp(user){
       return;
     }
     if(session && session.user){
-      startApp(session.user);
+      // setTimeout: o Supabase recomenda não fazer chamadas ao banco dentro do próprio callback.
+      setTimeout(()=> startApp(session.user), 0);
     } else {
+      resetSession();
       showScreen('loginScreen');
     }
   });
