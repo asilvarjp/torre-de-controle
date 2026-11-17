@@ -34,7 +34,7 @@ const IMP = {
   filtros: {unidade:'', modelo:'', busca:'', backup:false, semcad:false, semimp:false},
 };
 const IMP_TABS = [
-  ['dashboard','Dashboard executivo'], ['hoteis','Por hotel'], ['inventario','Inventário'],
+  ['dashboard','Dashboard executivo'], ['hoteis','Por hotel'], ['acumulado','Custo acumulado'], ['inventario','Inventário'],
   ['historico','Histórico mensal'], ['pendencias','Pendências'], ['legado','Cadastro geral'],
 ];
 const IMP_FABRICANTES = ['RICOH','EPSON','SAMSUNG','OKIDATA','HP','KYOCERA','BROTHER','CANON','XEROX','LEXMARK'];
@@ -351,7 +351,7 @@ function impTabsHtml(){
   const comps = IMP.competencias;
   let html = '<div class="imp-tabs" role="tablist">'+IMP_TABS.map(t=>'<button class="imp-tab '+(IMP.tab===t[0]?'active':'')+'" data-imptab="'+t[0]+'" role="tab">'+esc(t[1])+'</button>').join('');
   html += '<span class="imp-tabs-spacer"></span>';
-  if(IMP.tab !== 'legado' && comps.length){
+  if(IMP.tab !== 'legado' && IMP.tab !== 'acumulado' && comps.length){
     html += '<label class="imp-comp">Competência <select id="impCompSel" class="field-select">'+comps.map(c=>'<option value="'+c.competencia+'" '+(c.competencia===IMP.comp?'selected':'')+'>'+esc(impCompLabel(c.competencia))+'</option>').join('')+'</select></label>';
   }
   if(canWrite() && IMP.tab !== 'legado') html += '<button class="btn" id="impImportBtn"><span class="icon">'+ic('plus')+'</span>Importar competência</button>';
@@ -402,13 +402,13 @@ function impRender(){
   else if(IMP.tab === 'dashboard') body = impViewDashboard();
   else if(IMP.tab === 'hoteis') body = impViewHoteis();
   else if(IMP.tab === 'inventario') body = impViewInventario();
-  else if(IMP.tab === 'historico'){
+  else if(IMP.tab === 'historico' || IMP.tab === 'acumulado'){
     if(!IMP.hist){
       content.innerHTML = impTabsHtml()+'<div class="table-wrap"><div class="table-empty">Carregando histórico…</div></div>'; impWireTabs();
       impLoadHist().then(()=>{ impRender(); }).catch(e=>{ content.innerHTML = impTabsHtml()+'<div class="table-wrap"><div class="table-empty"><b>Não foi possível carregar o histórico</b>'+esc(e.message||String(e))+'</div></div>'; impWireTabs(); });
       return;
     }
-    body = impViewHistorico();
+    body = IMP.tab === 'acumulado' ? impViewAcumulado() : impViewHistorico();
   }
   else if(IMP.tab === 'pendencias') body = impViewPendencias();
   content.innerHTML = impTabsHtml()+body;
@@ -578,6 +578,55 @@ function impViewHoteis(){
   } else {
     html += '<div class="empty-note" style="padding:6px 2px;">Selecione um hotel na tabela para ver o detalhamento.</div>';
   }
+  return html;
+}
+
+/* ----------------------------- Custo acumulado por hotel ----------------------------- */
+// Soma, hotel a hotel, o custo de TODAS as competências importadas. O custo do hotel é o
+// custo de referência (locação + excedentes rateados). O desconto por renovação antecipada
+// e o valor faturado (ND) existem só no total do contrato, então aparecem na conciliação
+// abaixo e não são rateados por hotel (nada é estimado).
+function impAcumuladoPorHotel(H){
+  const m = {};
+  H.forEach(x=>{
+    x.calc.hoteis.forEach(h=>{
+      const a = m[h.unidade] = m[h.unidade] || {unidade:h.unidade, label:h.label, meses:0, loc:0, xPB:0, xCO:0, custo:0, pag:0, ult:0};
+      a.meses++; a.loc += h.loc; a.xPB += h.xPB; a.xCO += h.xCO; a.custo += h.custo; a.pag += h.pag;
+    });
+  });
+  const lastH = H[H.length-1].calc.hoteis;
+  const list = Object.values(m);
+  list.forEach(a=>{ a.ex = a.xPB + a.xCO; a.media = a.meses ? a.custo / a.meses : 0; a.ult = (lastH.find(h=>h.unidade===a.unidade)||{custo:null}).custo; });
+  list.sort((a,b)=> b.custo - a.custo);
+  const total = list.reduce((s,a)=>s+a.custo, 0);
+  list.forEach(a=>{ a.share = total > 0 ? a.custo / total : 0; });
+  return {list, total};
+}
+
+function impViewAcumulado(){
+  const H = IMP.hist;
+  if(!H || !H.length) return impViewVazio();
+  const {list, total} = impAcumuladoPorHotel(H);
+  const per = impCompLabel(H[0].header.competencia)+(H.length>1 ? ' a '+impCompLabel(H[H.length-1].header.competencia) : '');
+  const desc = H.reduce((s,x)=>s+x.calc.desconto, 0), fat = H.reduce((s,x)=>s+x.calc.faturado, 0);
+  const sum = k => list.reduce((s,a)=>s+a[k], 0);
+  const th = t => '<th class="num-cell">'+t+'</th>';
+  const tot = {loc:sum('loc'), xPB:sum('xPB'), xCO:sum('xCO'), ex:sum('ex')};
+
+  let html = '<div class="panel"><h2>Custo total por hotel — soma de todos os meses</h2><div class="panel-sub">'+H.length+' competência'+(H.length===1?'':'s')+' importada'+(H.length===1?'':'s')+' ('+esc(per)+') · custo de referência = locação + excedentes rateados</div>'+
+    '<div class="kpi-grid">'+
+      impKpi('compras', fmtCurrency(total), 'Custo de referência acumulado', 'soma dos '+list.length+' hotéis em '+H.length+' mês'+(H.length===1?'':'es'))+
+      impKpi('locados', fmtCurrency(tot.loc), 'Locação acumulada', total>0 ? impPct(tot.loc/total)+' do custo' : '')+
+      impKpi('depreciacao', fmtCurrency(tot.ex), 'Excedentes acumulados', total>0 ? impPct(tot.ex/total)+' do custo' : '')+
+      impKpi('compras', fmtCurrency(fat), 'Valor faturado (ND) acumulado', desc>0 ? 'após '+fmtCurrency(desc)+' de desconto por renovação antecipada' : 'sem desconto informado')+
+    '</div>'+
+    '<div class="table-scroll"><table class="imp-wide"><thead><tr><th>Hotel</th>'+th('Meses')+th('Locação')+th('Exced. PB')+th('Exced. cor')+th('Custo total acumulado')+th('% do total')+th('Média mensal')+th('Último mês')+'</tr></thead><tbody>'+
+    list.map(a=>'<tr><td><b>'+esc(a.label)+'</b></td><td class="num-cell">'+a.meses+'</td><td class="num-cell">'+fmtCurrency(a.loc)+'</td><td class="num-cell">'+fmtCurrency(a.xPB)+'</td><td class="num-cell">'+fmtCurrency(a.xCO)+'</td><td class="num-cell"><b>'+fmtCurrency(a.custo)+'</b></td><td class="num-cell">'+impPct(a.share)+'</td><td class="num-cell">'+fmtCurrency(a.media)+'</td><td class="num-cell">'+(a.ult===null?'—':fmtCurrency(a.ult))+'</td></tr>').join('')+
+    '</tbody><tfoot><tr><td><b>Total</b></td><td class="num-cell">'+H.length+'</td><td class="num-cell">'+fmtCurrency(tot.loc)+'</td><td class="num-cell">'+fmtCurrency(tot.xPB)+'</td><td class="num-cell">'+fmtCurrency(tot.xCO)+'</td><td class="num-cell"><b>'+fmtCurrency(total)+'</b></td><td class="num-cell">100,0%</td><td class="num-cell">'+fmtCurrency(H.length ? total/H.length : 0)+'/mês</td><td class="num-cell">—</td></tr></tfoot></table></div>'+
+    '<div class="imp-fine">"Meses" = competências em que o hotel teve equipamento. "Média mensal" = total do hotel ÷ meses com equipamento. O desconto por renovação antecipada e o valor faturado (ND) constam só no total do contrato — não são divididos por hotel, para não estimar valores que o descritivo não informa. Faturado acumulado = custo de referência − descontos.</div></div>';
+
+  html += '<div class="panel"><h2>Ranking do custo acumulado</h2><div class="panel-sub">'+esc(per)+'</div>'+
+    impRank(list.map(a=>({label:a.label, v:a.custo})), fmtCurrency, 'Sem dados.')+'</div>';
   return html;
 }
 

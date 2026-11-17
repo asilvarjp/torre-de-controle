@@ -138,8 +138,8 @@ serve.ps1              servidor local só para testes (não é usado no GitHub P
 
 ## Impressoras — contrato de outsourcing
 
-O módulo tem cinco visões sobre o descritivo mensal do fornecedor (Dashboard
-executivo, Por hotel, Inventário, Histórico mensal e Pendências) mais o
+O módulo tem seis visões sobre o descritivo mensal do fornecedor (Dashboard
+executivo, Por hotel, Custo acumulado, Inventário, Histórico mensal e Pendências) mais o
 "Cadastro geral" do parque antigo.
 
 - **Nada é estimado.** Só aparecem valores informados no descritivo; o que falta
