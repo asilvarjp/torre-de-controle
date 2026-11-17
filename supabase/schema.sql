@@ -277,6 +277,26 @@ create table if not exists public.impressoras_mensal (
 create index if not exists impressoras_mensal_competencia_idx on public.impressoras_mensal (competencia);
 create index if not exists impressoras_mensal_impressora_idx on public.impressoras_mensal (impressora_id);
 
+-- Rateio por hotel conforme a FT (fatura/controle de pagamento do fornecedor):
+-- quanto de cada competência foi lançado para cada hotel. Vem dos arquivos "FT"
+-- (aba "Rateio"), que só trazem o total por hotel — sem detalhe por equipamento.
+-- É daqui que sai o "Custo acumulado" por hotel. Uma linha por hotel por mês.
+create table if not exists public.impressoras_rateio (
+  id uuid primary key default gen_random_uuid(),
+  competencia date not null,          -- sempre dia 1 do mês de USO (não o mês do lançamento)
+  unidade text not null,
+  valor numeric not null,
+  ft_numero text,                     -- nº da FT quando consta no nome do arquivo
+  conta_contabil text,
+  centro_custo text,
+  arquivo_origem text,
+  observacao text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (competencia, unidade)
+);
+create index if not exists impressoras_rateio_competencia_idx on public.impressoras_rateio (competencia);
+
 -- ---------------------------------------------------------------------------
 -- PERFIS DE ACESSO
 --   admin  — tudo: cadastra, edita, exclui, restaura da lixeira e gerencia usuários
@@ -420,7 +440,7 @@ begin
   if r.tabela <> all (array[
     'inventario','estoque','locados','compras','licencas',
     'transporte','impressoras','teamviewer','depreciacao','linhas',
-    'impressoras_competencias','impressoras_mensal'
+    'impressoras_competencias','impressoras_mensal','impressoras_rateio'
   ]) then
     raise exception 'Tabela inválida: %', r.tabela;
   end if;
@@ -603,7 +623,7 @@ begin
     select unnest(array[
       'inventario','estoque','locados','compras','licencas',
       'transporte','impressoras','teamviewer','depreciacao','linhas',
-      'impressoras_competencias','impressoras_mensal'
+      'impressoras_competencias','impressoras_mensal','impressoras_rateio'
     ])
   loop
     execute format('drop trigger if exists trg_set_updated_at on public.%I', t);
@@ -831,7 +851,7 @@ begin
   for t in
     select unnest(array[
       'inventario','locados','compras','licencas','transporte',
-      'impressoras','teamviewer','depreciacao','linhas','impressoras_mensal'
+      'impressoras','teamviewer','depreciacao','linhas','impressoras_mensal','impressoras_rateio'
     ])
   loop
     execute format('drop trigger if exists trg_normalizar_unidade on public.%I', t);

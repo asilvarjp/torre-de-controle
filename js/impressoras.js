@@ -28,6 +28,7 @@ const IMP = {
   header: null, prevHeader: null,
   calc: null, prevCalc: null,
   hist: null,
+  rateio: [], rateioMissing: false,
   hotel: '',
   missing: false,
   loaded: false,
@@ -126,6 +127,13 @@ async function impLoadHist(){
   const by = {};
   rows.forEach(r=>{ (by[r.competencia] = by[r.competencia] || []).push(r); });
   IMP.hist = IMP.competencias.slice().reverse().map(h => ({ header:h, calc: impCalc(h, impJoin(by[h.competencia]||[])) }));
+  // rateio por hotel das FTs (tabela criada pelo schema.sql mais recente; sem ela a aba usa só os descritivos)
+  IMP.rateio = []; IMP.rateioMissing = false;
+  try{
+    IMP.rateio = await impFetchAll(()=> supabaseClient.from('impressoras_rateio').select('*').order('competencia'));
+  }catch(e){
+    if(e && (e.code==='42P01' || e.code==='PGRST205' || /impressoras_rateio|schema cache/i.test(e.message||''))) IMP.rateioMissing = true; else throw e;
+  }
 }
 
 /* ----------------------------- motor de cálculo ----------------------------- */
@@ -354,7 +362,8 @@ function impTabsHtml(){
   if(IMP.tab !== 'legado' && IMP.tab !== 'acumulado' && comps.length){
     html += '<label class="imp-comp">Competência <select id="impCompSel" class="field-select">'+comps.map(c=>'<option value="'+c.competencia+'" '+(c.competencia===IMP.comp?'selected':'')+'>'+esc(impCompLabel(c.competencia))+'</option>').join('')+'</select></label>';
   }
-  if(canWrite() && IMP.tab !== 'legado') html += '<button class="btn" id="impImportBtn"><span class="icon">'+ic('plus')+'</span>Importar competência</button>';
+  if(canWrite() && IMP.tab === 'acumulado') html += '<button class="btn" id="impImportFtBtn"><span class="icon">'+ic('plus')+'</span>Importar FT (rateio)</button>';
+  else if(canWrite() && IMP.tab !== 'legado') html += '<button class="btn" id="impImportBtn"><span class="icon">'+ic('plus')+'</span>Importar competência</button>';
   return html+'</div>';
 }
 
@@ -364,6 +373,8 @@ function impWireTabs(){
   if(sel) sel.addEventListener('change', async e=>{ IMP.comp = e.target.value; await impLoadComp(); impRender(); });
   const ib = document.getElementById('impImportBtn');
   if(ib) ib.addEventListener('click', impOpenImporter);
+  const fb = document.getElementById('impImportFtBtn');
+  if(fb) fb.addEventListener('click', impOpenRateioImporter);
 }
 
 async function impOpen(){
@@ -582,52 +593,197 @@ function impViewHoteis(){
 }
 
 /* ----------------------------- Custo acumulado por hotel ----------------------------- */
-// Soma, hotel a hotel, o custo de TODAS as competências importadas. O custo do hotel é o
-// custo de referência (locação + excedentes rateados). O desconto por renovação antecipada
-// e o valor faturado (ND) existem só no total do contrato, então aparecem na conciliação
-// abaixo e não são rateados por hotel (nada é estimado).
-function impAcumuladoPorHotel(H){
-  const m = {};
-  H.forEach(x=>{
-    x.calc.hoteis.forEach(h=>{
-      const a = m[h.unidade] = m[h.unidade] || {unidade:h.unidade, label:h.label, meses:0, loc:0, xPB:0, xCO:0, custo:0, pag:0, ult:0};
-      a.meses++; a.loc += h.loc; a.xPB += h.xPB; a.xCO += h.xCO; a.custo += h.custo; a.pag += h.pag;
+// Soma, hotel a hotel, o que foi lançado em TODOS os meses. A fonte principal é o rateio das FTs
+// (impressoras_rateio: total por hotel conforme a fatura). Hotel que não aparece na FT do mês
+// (ex.: Makaira) entra com o custo de referência do descritivo daquele mês; mês sem FT usa o
+// descritivo inteiro. Cada célula guarda a fonte, e a tela marca o que não veio da FT.
+function impAcumuladoPorHotel(H, R){
+  const ft = {};
+  (R||[]).forEach(r=>{ const c = String(r.competencia).slice(0,10); (ft[c] = ft[c] || {})[r.unidade] = r; });
+  const desc = {}; H.forEach(x=>{ desc[x.header.competencia] = x; });
+  const comps = Array.from(new Set(Object.keys(ft).concat(Object.keys(desc)))).sort();
+  const hot = {};
+  const meses = [];
+  let prevFt = null, prevComp = null;
+  comps.forEach(c=>{
+    const f = ft[c] || null, d = desc[c] || null;
+    const usados = {};
+    let totFT = 0, totDesc = 0;
+    if(f) Object.keys(f).forEach(u=>{ const v = Number(f[u].valor) || 0; usados[u] = {v, src:'ft'}; totFT += v; });
+    if(d) d.calc.hoteis.forEach(h=>{ if(!usados[h.unidade]){ usados[h.unidade] = {v:h.custo, src:'desc'}; totDesc += h.custo; } });
+    Object.keys(usados).forEach(u=>{
+      const a = hot[u] = hot[u] || {unidade:u, label: u==='(sem hotel)' ? u : unitLabel(u), cells:{}, custo:0, meses:0, temDesc:false};
+      a.cells[c] = usados[u]; a.custo += usados[u].v; a.meses++; if(usados[u].src==='desc') a.temDesc = true;
     });
+    const total = totFT + totDesc;
+    const avisos = [];
+    if(!f && d) avisos.push('Sem FT lançada: valores do descritivo (custo de referência).'+(d.calc.desconto>0 ? ' O desconto de '+fmtCurrency(d.calc.desconto)+' não está rateado por hotel, então o valor pode estar acima do faturado.' : ''));
+    if(f && d && totDesc > 0) avisos.push('Fora da FT, vindo do descritivo: '+Object.keys(usados).filter(u=>usados[u].src==='desc').map(u=>unitLabel(u)).join(', ')+' ('+fmtCurrency(totDesc)+').');
+    if(f && prevFt){
+      const ks = Object.keys(f), ps = Object.keys(prevFt);
+      if(ks.length && ks.length===ps.length && ks.every(u=> prevFt[u] && Math.abs(Number(f[u].valor) - Number(prevFt[u].valor)) < 0.005))
+        avisos.push('Valores idênticos aos da FT de '+impCompLabel(prevComp)+' em todos os hotéis — conferir se não é cópia não atualizada.');
+    }
+    const nd = d ? d.calc.faturado : null;
+    if(d && nd !== null && Math.abs(nd - total) > 0.05) avisos.push('Total lançado ('+fmtCurrency(total)+') difere do valor faturado (ND) do descritivo ('+fmtCurrency(nd)+') em '+fmtCurrency(Math.abs(nd-total))+'.');
+    meses.push({comp:c, fonte: f ? (totDesc>0 ? 'FT + descritivo' : 'FT') : 'Descritivo', total, nd, avisos});
+    if(f){ prevFt = f; prevComp = c; }
   });
-  const lastH = H[H.length-1].calc.hoteis;
-  const list = Object.values(m);
-  list.forEach(a=>{ a.ex = a.xPB + a.xCO; a.media = a.meses ? a.custo / a.meses : 0; a.ult = (lastH.find(h=>h.unidade===a.unidade)||{custo:null}).custo; });
-  list.sort((a,b)=> b.custo - a.custo);
+  const list = Object.values(hot);
   const total = list.reduce((s,a)=>s+a.custo, 0);
-  list.forEach(a=>{ a.share = total > 0 ? a.custo / total : 0; });
-  return {list, total};
+  list.forEach(a=>{ a.media = a.meses ? a.custo / a.meses : 0; a.share = total > 0 ? a.custo / total : 0; });
+  list.sort((a,b)=> b.custo - a.custo);
+  return {list, total, meses};
 }
 
 function impViewAcumulado(){
   const H = IMP.hist;
-  if(!H || !H.length) return impViewVazio();
-  const {list, total} = impAcumuladoPorHotel(H);
-  const per = impCompLabel(H[0].header.competencia)+(H.length>1 ? ' a '+impCompLabel(H[H.length-1].header.competencia) : '');
-  const desc = H.reduce((s,x)=>s+x.calc.desconto, 0), fat = H.reduce((s,x)=>s+x.calc.faturado, 0);
-  const sum = k => list.reduce((s,a)=>s+a[k], 0);
+  if(!H) return impViewVazio();
+  const {list, total, meses} = impAcumuladoPorHotel(H, IMP.rateio);
+  if(!meses.length) return impViewVazio();
+  const per = impCompLabel(meses[0].comp)+(meses.length>1 ? ' a '+impCompLabel(meses[meses.length-1].comp) : '');
+  const n = meses.length;
   const th = t => '<th class="num-cell">'+t+'</th>';
-  const tot = {loc:sum('loc'), xPB:sum('xPB'), xCO:sum('xCO'), ex:sum('ex')};
+  const top = list[0];
+  const nFt = meses.filter(m=>m.fonte!=='Descritivo').length;
+  let html = '';
+  if(IMP.rateioMissing) html += '<div class="panel"><div class="auth-error" style="margin:0">A tabela do rateio das FTs ainda não existe no banco: rode o <code>schema.sql</code> atualizado no SQL Editor. Enquanto isso, a tela usa só os descritivos importados.</div></div>';
 
-  let html = '<div class="panel"><h2>Custo total por hotel — soma de todos os meses</h2><div class="panel-sub">'+H.length+' competência'+(H.length===1?'':'s')+' importada'+(H.length===1?'':'s')+' ('+esc(per)+') · custo de referência = locação + excedentes rateados</div>'+
+  html += '<div class="panel"><h2>Custo total por hotel — soma de todos os meses</h2><div class="panel-sub">'+n+' mês'+(n===1?'':'es')+' ('+esc(per)+') · '+nFt+' com FT lançada · valores por mês de uso</div>'+
     '<div class="kpi-grid">'+
-      impKpi('compras', fmtCurrency(total), 'Custo de referência acumulado', 'soma dos '+list.length+' hotéis em '+H.length+' mês'+(H.length===1?'':'es'))+
-      impKpi('locados', fmtCurrency(tot.loc), 'Locação acumulada', total>0 ? impPct(tot.loc/total)+' do custo' : '')+
-      impKpi('depreciacao', fmtCurrency(tot.ex), 'Excedentes acumulados', total>0 ? impPct(tot.ex/total)+' do custo' : '')+
-      impKpi('compras', fmtCurrency(fat), 'Valor faturado (ND) acumulado', desc>0 ? 'após '+fmtCurrency(desc)+' de desconto por renovação antecipada' : 'sem desconto informado')+
+      impKpi('compras', fmtCurrency(total), 'Custo acumulado — todos os hotéis', 'soma de '+n+' mês'+(n===1?'':'es'))+
+      impKpi('locados', fmtCurrency(n ? total/n : 0), 'Média mensal', 'total ÷ '+n+' mês'+(n===1?'':'es'))+
+      impKpi('depreciacao', top ? esc(top.label) : '—', 'Hotel de maior custo acumulado', top ? fmtCurrency(top.custo)+' · '+impPct(top.share)+' do total' : '')+
+      impKpi('inventario', String(list.length), 'Hotéis com lançamento', '')+
     '</div>'+
-    '<div class="table-scroll"><table class="imp-wide"><thead><tr><th>Hotel</th>'+th('Meses')+th('Locação')+th('Exced. PB')+th('Exced. cor')+th('Custo total acumulado')+th('% do total')+th('Média mensal')+th('Último mês')+'</tr></thead><tbody>'+
-    list.map(a=>'<tr><td><b>'+esc(a.label)+'</b></td><td class="num-cell">'+a.meses+'</td><td class="num-cell">'+fmtCurrency(a.loc)+'</td><td class="num-cell">'+fmtCurrency(a.xPB)+'</td><td class="num-cell">'+fmtCurrency(a.xCO)+'</td><td class="num-cell"><b>'+fmtCurrency(a.custo)+'</b></td><td class="num-cell">'+impPct(a.share)+'</td><td class="num-cell">'+fmtCurrency(a.media)+'</td><td class="num-cell">'+(a.ult===null?'—':fmtCurrency(a.ult))+'</td></tr>').join('')+
-    '</tbody><tfoot><tr><td><b>Total</b></td><td class="num-cell">'+H.length+'</td><td class="num-cell">'+fmtCurrency(tot.loc)+'</td><td class="num-cell">'+fmtCurrency(tot.xPB)+'</td><td class="num-cell">'+fmtCurrency(tot.xCO)+'</td><td class="num-cell"><b>'+fmtCurrency(total)+'</b></td><td class="num-cell">100,0%</td><td class="num-cell">'+fmtCurrency(H.length ? total/H.length : 0)+'/mês</td><td class="num-cell">—</td></tr></tfoot></table></div>'+
-    '<div class="imp-fine">"Meses" = competências em que o hotel teve equipamento. "Média mensal" = total do hotel ÷ meses com equipamento. O desconto por renovação antecipada e o valor faturado (ND) constam só no total do contrato — não são divididos por hotel, para não estimar valores que o descritivo não informa. Faturado acumulado = custo de referência − descontos.</div></div>';
+    '<div class="table-scroll"><table class="imp-wide"><thead><tr><th>Hotel</th>'+meses.map(m=>th(impCompShort(m.comp))).join('')+th('Total acumulado')+th('% do total')+th('Média mensal')+'</tr></thead><tbody>'+
+    list.map(a=>'<tr><td><b>'+esc(a.label)+'</b></td>'+meses.map(m=>{ const c = a.cells[m.comp]; return '<td class="num-cell">'+(c ? fmtCurrency(c.v)+(c.src==='desc' ? '<sup title="Valor do descritivo (custo de referência): este hotel não consta na FT do mês">*</sup>' : '') : '—')+'</td>'; }).join('')+
+      '<td class="num-cell"><b>'+fmtCurrency(a.custo)+'</b></td><td class="num-cell">'+impPct(a.share)+'</td><td class="num-cell">'+fmtCurrency(a.media)+'</td></tr>').join('')+
+    '</tbody><tfoot><tr><td><b>Total</b></td>'+meses.map(m=>'<td class="num-cell"><b>'+fmtCurrency(m.total)+'</b></td>').join('')+'<td class="num-cell"><b>'+fmtCurrency(total)+'</b></td><td class="num-cell">100,0%</td><td class="num-cell">'+fmtCurrency(n ? total/n : 0)+'</td></tr></tfoot></table></div>'+
+    '<div class="imp-fine">Valores do rateio das FTs (aba "Rateio"), por mês de <b>uso</b> — não pelo mês em que a FT foi lançada. <sup>*</sup> = o hotel não consta na FT do mês; entra o custo de referência do descritivo. "Média mensal" = total do hotel ÷ meses com lançamento.</div></div>';
 
   html += '<div class="panel"><h2>Ranking do custo acumulado</h2><div class="panel-sub">'+esc(per)+'</div>'+
     impRank(list.map(a=>({label:a.label, v:a.custo})), fmtCurrency, 'Sem dados.')+'</div>';
+
+  html += '<div class="panel"><h2>Conferência por mês</h2><div class="panel-sub">De onde vem cada mês e se fecha com o valor faturado (ND) do descritivo, quando existe</div>'+
+    '<div class="table-scroll"><table class="imp-mini"><thead><tr><th>Mês de uso</th><th>Fonte</th><th class="num-cell">Total lançado</th><th class="num-cell">Faturado (ND)</th><th>Observações</th></tr></thead><tbody>'+
+    meses.map(m=>'<tr><td><b>'+esc(impCompLabel(m.comp))+'</b></td><td>'+impBadge(m.fonte, m.fonte==='FT' ? 'ok' : 'warn')+'</td><td class="num-cell">'+fmtCurrency(m.total)+'</td><td class="num-cell">'+(m.nd===null ? '—' : fmtCurrency(m.nd))+'</td><td>'+(m.avisos.length ? m.avisos.map(a=>'<div class="imp-fine" style="margin:0 0 3px">'+esc(a)+'</div>').join('') : '<span class="imp-ok">✓</span>')+'</td></tr>').join('')+
+    '</tbody></table></div></div>';
   return html;
+}
+
+/* Importar FT (rateio por hotel do mês) */
+function impParseFt(ws){
+  const aoa = XLSX.utils.sheet_to_json(ws, {header:1, raw:true, defval:null});
+  let hr = -1, cU = 3, cV = 4, cB = 1, cC = 2;
+  for(let i=0;i<Math.min(aoa.length,30);i++){
+    const cols = (aoa[i]||[]).map(impNorm);
+    const iu = cols.indexOf('UNIDADES');
+    if(iu >= 0){ hr = i; cU = iu; cV = cols.findIndex((t,ix)=> ix>iu && t==='TOTAL'); if(cV<0) cV = iu+1; cB = cols.findIndex(t=>t.startsWith('CONTACONTABIL')); cC = cols.findIndex(t=>t.startsWith('CENTRODECUSTO')); break; }
+  }
+  if(hr < 0) throw new Error('Não encontrei a tabela do rateio (coluna "UNIDADES"). Confira se é o arquivo FT e se a aba "Rateio" está preenchida.');
+  const rows = []; let totalPlanilha = null;
+  for(let i=hr+1;i<aoa.length;i++){
+    const r = aoa[i]||[]; const nome = impClean(r[cU]);
+    if(!nome) continue;
+    if(impNorm(nome)==='TOTAL'){ totalPlanilha = typeof r[cV]==='number' ? r[cV] : null; break; }
+    if(typeof r[cV] !== 'number') continue;
+    rows.push({linha:i+1, nome, unidade:unitCodeFromName(nome), valor:r[cV], conta: cB>=0 ? impClean(r[cB]) : null, cc: cC>=0 ? impClean(r[cC]) : null});
+  }
+  return {rows, totalPlanilha};
+}
+
+async function impOpenRateioImporter(){
+  if(!canWrite()){ toast('Seu perfil não permite importar.', true); return; }
+  const root = document.getElementById('modalRoot');
+  root.innerHTML = '<div class="modal-overlay" id="impOv"><div class="modal imp-modal"><div class="modal-head"><h2>Importar FT (rateio por hotel)</h2><button class="icon-btn" id="impMClose"><span class="icon">'+ic('close')+'</span></button></div>'+
+    '<div class="modal-body" id="impMBody"><p class="imp-p">Selecione o arquivo <b>FT</b> do mês (<code>.xlsx</code>, aba <b>Rateio</b>). Você informa o <b>mês de uso</b> a seguir. Nada é gravado antes da sua confirmação.</p>'+
+    '<input type="file" id="impFile" accept=".xlsx,.xlsm"/></div><div class="modal-foot" id="impMFoot"><button class="btn" id="impMCancel">Cancelar</button></div></div></div>';
+  const close = ()=>{ root.innerHTML = ''; };
+  document.getElementById('impMClose').addEventListener('click', close);
+  document.getElementById('impMCancel').addEventListener('click', close);
+  document.getElementById('impOv').addEventListener('click', e=>{ if(e.target.id==='impOv') close(); });
+  document.getElementById('impFile').addEventListener('change', async e=>{
+    const file = e.target.files[0]; if(!file) return;
+    const body = document.getElementById('impMBody'), foot = document.getElementById('impMFoot');
+    body.innerHTML = '<div class="table-empty">Lendo a planilha…</div>';
+    try{
+      await impLoadSheetJS();
+      const wb = XLSX.read(await file.arrayBuffer(), {type:'array'});
+      const meta = (wb.Workbook && wb.Workbook.Sheets) || [];
+      let nome = wb.SheetNames.find(n=>impNorm(n)==='RATEIO') || wb.SheetNames.find(n=>impNorm(n).includes('RATEIO'));
+      if(!nome) nome = wb.SheetNames.find((n,i)=> !(meta[i] && meta[i].Hidden));
+      const P = impParseFt(wb.Sheets[nome]); P.arquivo = file.name; P.aba = nome;
+      const mFt = file.name.match(/FT\s*(\d{3,})/i); P.ft = mFt ? mFt[1] : null;
+      impRateioPreview(P, close, body, foot);
+    }catch(err){
+      console.error(err);
+      body.innerHTML = '<div class="auth-error">'+esc(err.message||String(err))+'</div><p class="imp-p">Escolha outro arquivo.</p><input type="file" id="impFile2" accept=".xlsx,.xlsm"/>';
+      const f2 = document.getElementById('impFile2'); if(f2) f2.addEventListener('change', ev=>{ document.getElementById('impFile').files = ev.target.files; document.getElementById('impFile').dispatchEvent(new Event('change')); });
+    }
+  });
+}
+
+function impRateioPreview(P, close, body, foot){
+  const ex = IMP.rateio || [];
+  const ultimo = ex.length ? ex.map(r=>String(r.competencia).slice(0,10)).sort().pop() : null;
+  let mesIni, anoIni;
+  if(ultimo){ const d = new Date(+ultimo.slice(0,4), +ultimo.slice(5,7), 1); mesIni = d.getMonth()+1; anoIni = d.getFullYear(); }  // mês seguinte ao último lançado
+  else { const d = new Date(); mesIni = d.getMonth()+1; anoIni = d.getFullYear(); }
+  const soma = P.rows.reduce((s,r)=>s+r.valor, 0);
+  const semHotel = P.rows.filter(r=>!r.unidade);
+  const dup = P.rows.filter((r,i)=> r.unidade && P.rows.findIndex(x=>x.unidade===r.unidade) !== i);
+  const compStr = ()=> document.getElementById('impAno').value+'-'+String(document.getElementById('impMes').value).padStart(2,'0')+'-01';
+  body.innerHTML =
+    '<div class="imp-prev-grid"><div><label class="imp-lb">Mês de uso</label><div class="imp-comp-pick"><select id="impMes" class="field-select">'+MONTH_NAMES_PT.map((m,i)=>'<option value="'+(i+1)+'" '+((i+1)===mesIni?'selected':'')+'>'+m+'</option>').join('')+'</select><input id="impAno" type="number" class="field-select" value="'+anoIni+'" min="2020" max="2100" style="width:90px"/></div>'+
+      '<div class="imp-fine">O arquivo não informa o mês — confira. Lembre: a FT lançada em um mês costuma representar o uso do mês anterior.</div></div>'+
+    '<div><label class="imp-lb">Arquivo</label><div>'+esc(P.arquivo)+' · aba <b>'+esc(P.aba)+'</b>'+(P.ft?' · FT '+esc(P.ft):'')+'</div></div></div>'+
+    '<div class="table-scroll"><table class="imp-mini"><thead><tr><th>Hotel (como no arquivo)</th><th>Reconhecido como</th><th class="num-cell">Valor</th></tr></thead><tbody>'+
+    P.rows.map(r=>'<tr><td>'+esc(r.nome)+'</td><td>'+(r.unidade ? esc(unitLabel(r.unidade)) : impBadge('não reconhecido','crit'))+'</td><td class="num-cell">'+fmtCurrency(r.valor)+'</td></tr>').join('')+
+    '</tbody><tfoot><tr><td colspan="2"><b>Soma das linhas</b></td><td class="num-cell"><b>'+fmtCurrency(soma)+'</b></td></tr></tfoot></table></div>'+
+    '<ul class="imp-ul" id="impRChecks"></ul><div id="impExistWarn"></div>'+
+    '<label class="check-filter imp-ack"><input type="checkbox" id="impAck"/> Conferi os valores e quero importar</label><div id="impProg" class="imp-fine"></div>';
+  foot.innerHTML = '<button class="btn" id="impMCancel2">Cancelar</button><button class="btn btn-primary" id="impDo" disabled><span class="icon">'+ic('check')+'</span>Importar</button>';
+  document.getElementById('impMCancel2').addEventListener('click', close);
+
+  const refresh = ()=>{
+    const c = compStr(), checks = [];
+    checks.push({ok: P.totalPlanilha!==null && Math.abs(P.totalPlanilha - soma) < 0.01, texto: P.totalPlanilha!==null ? 'Soma das linhas ('+fmtCurrency(soma)+') '+(Math.abs(P.totalPlanilha - soma) < 0.01 ? 'confere com' : 'DIFERE do')+' TOTAL da planilha ('+fmtCurrency(P.totalPlanilha)+')' : 'A planilha não traz a linha TOTAL para conferir'});
+    checks.push({ok: !semHotel.length, texto: semHotel.length ? 'Hotel(éis) não reconhecido(s): '+semHotel.map(r=>r.nome).join(', ')+' — não serão importados' : 'Todos os hotéis foram reconhecidos'});
+    if(dup.length) checks.push({ok:false, texto:'Hotel repetido na planilha: '+dup.map(r=>unitLabel(r.unidade)).join(', ')+' — o último valor prevalece'});
+    const prevC = ex.map(r=>String(r.competencia).slice(0,10)).filter(x=>x<c).sort().pop();
+    if(prevC){
+      const prev = {}; ex.filter(r=>String(r.competencia).slice(0,10)===prevC).forEach(r=>{ prev[r.unidade] = Number(r.valor); });
+      const ks = P.rows.filter(r=>r.unidade);
+      if(ks.length && ks.every(r=> prev[r.unidade]!==undefined && Math.abs(prev[r.unidade]-r.valor) < 0.005)) checks.push({ok:false, texto:'Valores idênticos aos de '+impCompLabel(prevC)+' em todos os hotéis — possível cópia não atualizada'});
+    }
+    const d = IMP.hist && IMP.hist.find(x=>x.header.competencia===c);
+    if(d){ const nd = d.calc.faturado; const diff = nd - soma; checks.push({ok: Math.abs(diff) < 0.05, texto:'Valor faturado (ND) do descritivo de '+impCompLabel(c)+': '+fmtCurrency(nd)+(Math.abs(diff)<0.05 ? ' — confere com a FT' : ' — diferença de '+fmtCurrency(Math.abs(diff))+' (hotéis fora da FT, como Makaira, entram pelo descritivo)')}); }
+    document.getElementById('impRChecks').innerHTML = checks.map(k=>'<li>'+(k.ok?'<span class="imp-ok">✓</span>':'<span class="imp-bad">✗</span>')+' '+esc(k.texto)+'</li>').join('');
+    const ja = ex.some(r=>String(r.competencia).slice(0,10)===c);
+    document.getElementById('impExistWarn').innerHTML = ja ? '<div class="auth-error" style="margin-top:10px;">O rateio de <b>'+esc(impCompLabel(c))+'</b> já existe. Importar de novo <b>substitui os valores deste mês</b> e não toca nos demais.</div>' : '';
+  };
+  ['impMes','impAno'].forEach(id=> document.getElementById(id).addEventListener('change', refresh));
+  refresh();
+  document.getElementById('impAck').addEventListener('change', e=>{ document.getElementById('impDo').disabled = !e.target.checked; });
+  document.getElementById('impDo').addEventListener('click', async ()=>{
+    const btn = document.getElementById('impDo'), prog = document.getElementById('impProg'); btn.disabled = true;
+    try{
+      const c = compStr();
+      const por = new Map(); P.rows.filter(r=>r.unidade).forEach(r=> por.set(r.unidade, r));
+      const rows = Array.from(por.values()).map(r=>({competencia:c, unidade:r.unidade, valor:Math.round(r.valor*1e6)/1e6, ft_numero:P.ft, conta_contabil:r.conta, centro_custo:r.cc, arquivo_origem:P.arquivo}));
+      prog.textContent = 'Gravando…';
+      const { error } = await supabaseClient.from('impressoras_rateio').upsert(rows, {onConflict:'competencia,unidade'});
+      if(error) throw error;
+      close();
+      toast('FT de '+impCompLabel(c)+' importada: '+rows.length+' hotéis.');
+      IMP.hist = null; IMP.loaded = false;
+      await impOpen();
+    }catch(err){
+      console.error(err); prog.textContent = '';
+      toast('Não foi possível importar: '+friendlyError(err,'importar'), true); btn.disabled = false;
+    }
+  });
 }
 
 /* ----------------------------- Inventário ----------------------------- */

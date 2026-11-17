@@ -158,6 +158,13 @@ executivo, Por hotel, Custo acumulado, Inventário, Histórico mensal e Pendênc
   guardado; importar um novo mês não altera os anteriores.
 - Equipamentos já cadastrados não têm dados sobrescritos na importação (só
   campos vazios são completados).
+- **Custo acumulado por hotel:** soma, mês a mês, do que foi lançado para cada
+  hotel. A fonte é o **rateio das FTs** (arquivos `FT`, aba `Rateio`): o total por
+  hotel conforme a fatura, por mês de *uso* (a FT lançada em fevereiro representa
+  janeiro). Hotel que não consta na FT (ex.: Makaira) entra pelo custo de
+  referência do descritivo, e mês sem FT usa o descritivo — tudo marcado na tela,
+  com uma tabela de conferência por mês (total × valor faturado/ND, FT repetida).
+  Para lançar um mês novo: aba **Custo acumulado → Importar FT (rateio)**.
 
 ## Nomenclatura dos hotéis
 
